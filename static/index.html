@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BWSSB Water Distribution AI</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f4f8; min-height: 100vh; color: #1a202c; }
+
+  header { background: #1a365d; color: white; padding: 16px 32px; display: flex; align-items: center; gap: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+  header .logo { width: 44px; height: 44px; background: #2b6cb0; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header p  { font-size: 12px; opacity: 0.7; margin-top: 2px; }
+
+  .container { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+
+  .card { background: white; border-radius: 16px; padding: 24px 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.07); margin-bottom: 20px; }
+
+  label.field-label { display: block; font-size: 12px; font-weight: 600; color: #4a5568; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  .input-row { display: flex; gap: 12px; }
+  #query-input { flex: 1; padding: 13px 16px; border: 1.5px solid #e2e8f0; border-radius: 10px; font-size: 15px; outline: none; transition: border-color 0.2s; background: #f7fafc; }
+  #query-input:focus { border-color: #3182ce; background: white; }
+
+  #submit-btn { padding: 13px 26px; background: #2b6cb0; color: white; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
+  #submit-btn:hover:not(:disabled) { background: #2c5282; }
+  #submit-btn:disabled { background: #a0aec0; cursor: not-allowed; }
+
+  .suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .chip { padding: 5px 14px; background: #ebf8ff; color: #2b6cb0; border: 1px solid #bee3f8; border-radius: 20px; font-size: 12px; cursor: pointer; transition: background 0.15s; }
+  .chip:hover { background: #bee3f8; }
+
+  /* Pipeline steps */
+  #pipeline { display: none; }
+  .steps { display: flex; align-items: center; }
+  .step { flex: 1; text-align: center; position: relative; }
+  .step:not(:last-child)::after { content: ''; position: absolute; top: 15px; left: 50%; width: 100%; height: 2px; background: #e2e8f0; z-index: 0; }
+  .step.done:not(:last-child)::after  { background: #48bb78; }
+  .dot { width: 30px; height: 30px; border-radius: 50%; background: #e2e8f0; color: #718096; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; margin: 0 auto 6px; position: relative; z-index: 1; transition: all 0.3s; }
+  .step.active .dot { background: #3182ce; color: white; box-shadow: 0 0 0 5px #ebf8ff; animation: pulse 1.2s infinite; }
+  .step.done .dot   { background: #48bb78; color: white; }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 4px #ebf8ff}50%{box-shadow:0 0 0 8px #bee3f8} }
+  .step-lbl { font-size: 11px; color: #718096; }
+  .step.active .step-lbl { color: #2b6cb0; font-weight: 600; }
+  .step.done  .step-lbl  { color: #38a169; }
+
+  /* Answer */
+  #results { display: none; }
+  .answer-card { background: linear-gradient(135deg, #1a365d, #2b6cb0); border-radius: 14px; padding: 24px 28px; color: white; margin-bottom: 20px; }
+  .answer-card .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.65; margin-bottom: 10px; }
+  .answer-text { font-size: 15px; line-height: 1.75; white-space: pre-wrap; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media(max-width:600px){ .two-col { grid-template-columns: 1fr; } }
+
+  .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #718096; font-weight: 600; margin-bottom: 12px; }
+
+  .sq-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid #f7fafc; font-size: 13px; line-height: 1.5; }
+  .sq-item:last-child { border-bottom: none; }
+  .db-tag { padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; white-space: nowrap; flex-shrink: 0; margin-top: 2px; }
+  .reservoir_db { background:#ebf8ff; color:#2b6cb0; }
+  .demand_db    { background:#f0fff4; color:#276749; }
+  .rules_db     { background:#fffbeb; color:#975a16; }
+
+  .db-result-item { padding: 10px 0; border-bottom: 1px solid #f7fafc; font-size: 12px; }
+  .db-result-item:last-child { border-bottom: none; }
+  .db-result-label { font-weight: 600; color: #4a5568; margin-bottom: 4px; }
+  .db-result-values { color: #718096; line-height: 1.6; }
+
+  #error-msg { display: none; background: #fff5f5; border: 1px solid #feb2b2; color: #9b2c2c; border-radius: 12px; padding: 14px 18px; font-size: 13px; margin-bottom: 20px; }
+
+  /* groq badge */
+  .groq-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; color: #2b6cb0; background: #ebf8ff; border: 1px solid #bee3f8; border-radius: 20px; padding: 2px 8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">💧</div>
+  <div>
+    <h1>BWSSB Water Distribution AI</h1>
+    <p>AI-powered water release planning — local DBs · LLM Powered</p>
+  </div>
+</header>
+
+<div class="container">
+
+  <div class="card">
+    <label class="field-label">Ask a water distribution question</label>
+    <div class="input-row">
+      <input id="query-input" type="text"
+             placeholder="e.g. What is the water quantity to be released to Jayanagar tomorrow?"
+             value="What is the water quantity to be released to Jayanagar tomorrow?">
+      <button id="submit-btn" onclick="runQuery()">Analyse →</button>
+    </div>
+    <div class="suggestions">
+      <span class="chip" onclick="setQ(this)">Release quantity for Koramangala tomorrow</span>
+      <span class="chip" onclick="setQ(this)">Is there a water deficit in HSR Layout?</span>
+      <span class="chip" onclick="setQ(this)">Current reservoir levels and inflow</span>
+      <span class="chip" onclick="setQ(this)">Release policy limits for BTM Layout</span>
+    </div>
+  </div>
+
+  <div id="error-msg"></div>
+
+  <div id="pipeline" class="card">
+    <div class="steps">
+      <div class="step" id="s1"><div class="dot">1</div><div class="step-lbl">Understand<br>Question</div></div>
+      <div class="step" id="s2"><div class="dot">2</div><div class="step-lbl">Query<br>DBs</div></div>
+      <div class="step" id="s3"><div class="dot">3</div><div class="step-lbl">Summarise<br></div></div>
+      <div class="step" id="s4"><div class="dot">4</div><div class="step-lbl">Answer<br>ready</div></div>
+    </div>
+  </div>
+
+  <div id="results">
+    <div class="answer-card">
+      <div class="label">AI Recommendation </div>
+      <div class="answer-text" id="final-answer"></div>
+    </div>
+
+    <div class="two-col">
+      <div class="card">
+        <div class="section-title">Sub-questions</div>
+        <div id="sub-questions-list"></div>
+      </div>
+      <div class="card">
+        <div class="section-title">Database answers</div>
+        <div id="db-results-list"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API = 'http://localhost:8000';
+
+function setQ(el) { document.getElementById('query-input').value = el.textContent; }
+
+function setStep(n) {
+  for (let i = 1; i <= 4; i++) {
+    const el = document.getElementById(`s${i}`);
+    el.classList.remove('active','done');
+    if (i < n)  el.classList.add('done');
+    if (i === n) el.classList.add('active');
+  }
+}
+
+
+function fmtDbData(result) {
+
+  if (!result) {
+    return `<span style="color:red">No result</span>`;
+  }
+
+  const data = result.data || {};
+  const question = (result.question || "").toLowerCase();
+
+  if (data.error) {
+    return `
+      <span style="color:#e53e3e">
+        ${data.error}
+      </span>
+    `;
+  }
+
+  // --------------------------------------------------
+  // Reservoir Questions
+  // --------------------------------------------------
+
+  if (question.includes("reservoir")) {
+
+    return `
+      <div><b>Reservoir Level:</b> ${data.reservoir_level_pct ?? '-'}%</div>
+      <div><b>Inflow:</b> ${data.inflow_mld ?? '-'} MLD</div>
+      <div><b>Temperature:</b> ${data.temp_c ?? '-'}°C</div>
+      <div><b>Rainfall:</b> ${data.rainfall_mm ?? '-'} mm</div>
+    `;
+  }
+
+  // --------------------------------------------------
+  // Demand Questions
+  // --------------------------------------------------
+
+  if (question.includes("demand")) {
+
+    return `
+      <div><b>Projected Demand:</b> ${data.demand_mld ?? '-'} MLD</div>
+      <div><b>Actual Supply:</b> ${data.actual_supply_mld ?? '-'} MLD</div>
+      <div><b>Deficit:</b> ${data.deficit_mld ?? '-'} MLD</div>
+    `;
+  }
+
+  // --------------------------------------------------
+  // Release / Policy Questions
+  // --------------------------------------------------
+
+  if (
+      question.includes("release") ||
+      question.includes("policy") ||
+      question.includes("limit")
+  ) {
+
+    return `
+      <div><b>Minimum Release:</b> ${data.min_release_mld ?? '-'} MLD</div>
+      <div><b>Maximum Release:</b> ${data.max_release_mld ?? '-'} MLD</div>
+      <div><b>Priority Level:</b> ${data.priority_level ?? '-'}</div>
+    `;
+  }
+
+  // --------------------------------------------------
+  // Ward / Groundwater Questions
+  // --------------------------------------------------
+
+  if (
+      question.includes("groundwater") ||
+      question.includes("ward") ||
+      question.includes("gwl")
+  ) {
+
+    return `
+      <div><b>Ward:</b> ${data.ward_name ?? '-'}</div>
+      <div><b>Ward No:</b> ${data.ward_no ?? '-'}</div>
+      <div><b>Population:</b> ${data.population ?? '-'}</div>
+      <div><b>Groundwater Level:</b> ${data.avg_annual_gwl_m ?? '-'} m</div>
+      <div><b>Monthly Rainfall:</b> ${data.avg_monthly_rainfall_mm ?? '-'} mm</div>
+      <div><b>Temperature:</b> ${data.avg_t2m_max_c ?? '-'}°C</div>
+    `;
+  }
+
+  // --------------------------------------------------
+  // Rainfall Questions
+  // --------------------------------------------------
+
+  if (question.includes("rainfall")) {
+
+    return `
+      <div><b>Average Rainfall:</b> ${data.avg_monthly_rainfall_mm ?? '-'} mm</div>
+      <div><b>Temperature:</b> ${data.avg_t2m_max_c ?? '-'}°C</div>
+    `;
+  }
+
+  // --------------------------------------------------
+  // Population Questions
+  // --------------------------------------------------
+
+  if (question.includes("population")) {
+
+    return `
+      <div><b>Ward:</b> ${data.ward_name ?? '-'}</div>
+      <div><b>Population:</b> ${data.population ?? '-'}</div>
+    `;
+  }
+
+  // --------------------------------------------------
+  // Generic Fallback
+  // --------------------------------------------------
+
+  return `
+    <pre style="white-space:pre-wrap">
+${JSON.stringify(data, null, 2)}
+    </pre>
+  `;
+}
+
+
+
+async function runQuery() {
+  const query = document.getElementById('query-input').value.trim();
+  if (!query) return;
+
+  document.getElementById('submit-btn').disabled = true;
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('error-msg').style.display = 'none';
+  document.getElementById('pipeline').style.display = 'block';
+  setStep(1);
+
+  const delay = ms => new Promise(r => setTimeout(r, ms));
+
+  try {
+    await delay(500); setStep(2);
+    await delay(600); setStep(3);
+
+    const resp = await fetch(`${API}/query`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({query})
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `Server error ${resp.status}`);
+    }
+
+    setStep(4);
+    await delay(300);
+
+    const data = await resp.json();
+
+    // Sub-questions panel
+    document.getElementById('sub-questions-list').innerHTML =
+      (data.sub_questions || []).map(sq => `
+        <div class="sq-item">
+          <span class="db-tag ${sq.db}">${sq.db.replace('_db','')}</span>
+          <span>${sq.question}</span>
+        </div>`).join('') || '<p style="color:#718096;font-size:13px">None</p>';
+
+    // DB results panel
+    document.getElementById('db-results-list').innerHTML =
+      (data.db_results || []).map(r => `
+        <div class="db-result-item">
+          <div class="db-result-label">${r.db.replace('_db','')} DB${r.zone ? ' · '+r.zone : ''}</div>
+          <div class="db-result-values">${fmtDbData(r)}</div>
+        </div>`).join('') || '<p style="color:#718096;font-size:13px">None</p>';
+
+    // Final answer
+    document.getElementById('final-answer').textContent = data.final_answer;
+
+    // Mark all done
+    for (let i = 1; i <= 4; i++) {
+      const el = document.getElementById(`s${i}`);
+      el.classList.remove('active'); el.classList.add('done');
+    }
+
+    document.getElementById('results').style.display = 'block';
+
+  } catch (err) {
+    document.getElementById('pipeline').style.display = 'none';
+    const e = document.getElementById('error-msg');
+    e.style.display = 'block';
+    e.textContent = `Error: ${err.message}. Make sure the orchestrator is running on localhost:8000 and your API_KEY is set in .env`;
+  }
+
+  document.getElementById('submit-btn').disabled = false;
+}
+
+document.getElementById('query-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runQuery();
+});
+</script>
+</body>
+</html>
