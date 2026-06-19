@@ -5,333 +5,457 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BWSSB Water Distribution AI</title>
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f4f8; min-height: 100vh; color: #1a202c; }
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#111827;color:#f9fafb;min-height:100vh}
+.page{max-width:900px;margin:0 auto;padding:20px 16px}
 
-  header { background: #1a365d; color: white; padding: 16px 32px; display: flex; align-items: center; gap: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
-  header .logo { width: 44px; height: 44px; background: #2b6cb0; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
-  header h1 { font-size: 18px; font-weight: 600; }
-  header p  { font-size: 12px; opacity: 0.7; margin-top: 2px; }
+/* Header */
+.header{background:#1a365d;border-radius:14px;padding:16px 24px;display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.logo{width:40px;height:40px;background:rgba(255,255,255,0.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.header h1{font-size:16px;font-weight:600;color:white}
+.header p{font-size:12px;opacity:0.55;margin-top:2px;color:white}
+.provider-badge{margin-left:auto;padding:4px 10px;background:rgba(255,255,255,0.1);border-radius:20px;font-size:11px;color:rgba(255,255,255,0.75);white-space:nowrap;flex-shrink:0}
 
-  .container { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+/* Cards */
+.card{background:#1f2937;border-radius:14px;border:1px solid #374151;padding:20px 24px;margin-bottom:14px}
+.field-label{font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px}
+.input-row{display:flex;gap:10px}
+.qinput{flex:1;padding:11px 14px;border:1px solid #374151;border-radius:10px;font-size:14px;color:#f9fafb;background:#111827;outline:none;transition:border-color 0.2s}
+.qinput:focus{border-color:#3b82f6}
+.qinput::placeholder{color:#4b5563}
+.btn-analyse{padding:11px 22px;background:#1d4ed8;color:white;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background 0.2s}
+.btn-analyse:hover:not(:disabled){background:#2563eb}
+.btn-analyse:disabled{background:#374151;color:#6b7280;cursor:not-allowed}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.chip{padding:5px 12px;background:rgba(59,130,246,0.1);color:#60a5fa;border:1px solid rgba(59,130,246,0.25);border-radius:20px;font-size:12px;cursor:pointer;transition:background 0.15s}
+.chip:hover{background:rgba(59,130,246,0.2)}
 
-  .card { background: white; border-radius: 16px; padding: 24px 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.07); margin-bottom: 20px; }
+/* Pipeline */
+.pipeline{display:flex;align-items:center}
+.step{flex:1;text-align:center;position:relative}
+.step:not(:last-child)::after{content:'';position:absolute;top:13px;left:50%;width:100%;height:1.5px;background:#374151;z-index:0;transition:background 0.4s}
+.step.done:not(:last-child)::after{background:#059669}
+.dot{width:27px;height:27px;border-radius:50%;background:#374151;color:#6b7280;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin:0 auto 5px;position:relative;z-index:1;transition:all 0.3s;border:2px solid transparent}
+.step.active .dot{background:#1d4ed8;color:white;border-color:#3b82f6;box-shadow:0 0 0 4px rgba(59,130,246,0.2);animation:pulse 1.2s infinite}
+.step.done .dot{background:#059669;color:white;border-color:#059669}
+.step-lbl{font-size:11px;color:#6b7280}
+.step.active .step-lbl{color:#60a5fa;font-weight:600}
+.step.done .step-lbl{color:#34d399}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 4px rgba(59,130,246,0.15)}50%{box-shadow:0 0 0 8px rgba(59,130,246,0.07)}}
 
-  label.field-label { display: block; font-size: 12px; font-weight: 600; color: #4a5568; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+/* Results */
+#results{display:none}
 
-  .input-row { display: flex; gap: 12px; }
-  #query-input { flex: 1; padding: 13px 16px; border: 1.5px solid #e2e8f0; border-radius: 10px; font-size: 15px; outline: none; transition: border-color 0.2s; background: #f7fafc; }
-  #query-input:focus { border-color: #3182ce; background: white; }
+/* Metric grid */
+.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.metric{background:#1f2937;border-radius:10px;border:1px solid #4b5563;padding:14px 16px}
+.metric-label{font-size:11px;font-weight:500;color:#d1d5db;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.04em}
+.metric-value{font-size:22px;font-weight:700;color:#f9fafb;line-height:1}
+.metric-unit{font-size:12px;color:#d1d5db;margin-left:3px;font-weight:500}
+@media(max-width:580px){.metric-grid{grid-template-columns:1fr 1fr}}
 
-  #submit-btn { padding: 13px 26px; background: #2b6cb0; color: white; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
-  #submit-btn:hover:not(:disabled) { background: #2c5282; }
-  #submit-btn:disabled { background: #a0aec0; cursor: not-allowed; }
+/* Direct answer */
+.direct-card{background:linear-gradient(135deg,#1a365d,#1e40af);border-radius:14px;padding:20px 24px;margin-bottom:14px;border:1px solid #1e40af}
+.da-label{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.9);margin-bottom:12px}
+.da-text{font-size:18px;font-weight:500;line-height:1.7;color:white}
 
-  .suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-  .chip { padding: 5px 14px; background: #ebf8ff; color: #2b6cb0; border: 1px solid #bee3f8; border-radius: 20px; font-size: 12px; cursor: pointer; transition: background 0.15s; }
-  .chip:hover { background: #bee3f8; }
+/* Key factors */
+.section-title{font-size:13px;font-weight:700;color:#f3f4f6;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:16px}
+.step-block{margin-bottom:18px}
+.step-block:last-child{margin-bottom:0}
+.step-head{font-size:15px;font-weight:600;color:#f9fafb;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+.step-num{width:22px;height:22px;background:rgba(59,130,246,0.2);color:#93c5fd;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
+.step-formula{font-size:11px;color:#9ca3af;margin-left:30px;margin-bottom:8px;font-style:italic}
+.rows{margin-left:30px}
+.kf-row{display:flex;justify-content:space-between;align-items:baseline;padding:7px 0;border-bottom:1px solid #374151;font-size:14px;gap:12px}
+.kf-row:last-child{border-bottom:none}
+.kf-label{color:#e5e7eb;flex-shrink:0}
+.kf-val{font-weight:600;text-align:right;color:#f9fafb}
+.kf-sub{font-size:11px;color:#6b7280;font-weight:400;margin-left:6px}
+.kf-neg{color:#fbbf24}
+.kf-pos{color:#34d399}
+.kf-info{color:#60a5fa}
+.result-row{background:#111827;border-radius:8px;padding:10px 14px;margin-top:8px;margin-left:30px;display:flex;justify-content:space-between;align-items:center;border:1px solid #4b5563;border-left:3px solid #3b82f6}
+.result-row .rl{font-size:13px;font-weight:600;color:#e5e7eb}
+.result-row .rv{font-size:16px;font-weight:700;color:#f9fafb}
+.kf-divider{height:1px;background:#374151;margin:16px 0}
+/* prose text under step heads (policy check, valve hours) */
+.step-prose{font-size:14px;color:#f3f4f6;line-height:1.7;margin-left:30px;margin-top:6px}
 
-  /* Pipeline steps */
-  #pipeline { display: none; }
-  .steps { display: flex; align-items: center; }
-  .step { flex: 1; text-align: center; position: relative; }
-  .step:not(:last-child)::after { content: ''; position: absolute; top: 15px; left: 50%; width: 100%; height: 2px; background: #e2e8f0; z-index: 0; }
-  .step.done:not(:last-child)::after  { background: #48bb78; }
-  .dot { width: 30px; height: 30px; border-radius: 50%; background: #e2e8f0; color: #718096; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; margin: 0 auto 6px; position: relative; z-index: 1; transition: all 0.3s; }
-  .step.active .dot { background: #3182ce; color: white; box-shadow: 0 0 0 5px #ebf8ff; animation: pulse 1.2s infinite; }
-  .step.done .dot   { background: #48bb78; color: white; }
-  @keyframes pulse { 0%,100%{box-shadow:0 0 0 4px #ebf8ff}50%{box-shadow:0 0 0 8px #bee3f8} }
-  .step-lbl { font-size: 11px; color: #718096; }
-  .step.active .step-lbl { color: #2b6cb0; font-weight: 600; }
-  .step.done  .step-lbl  { color: #38a169; }
+/* Two col */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+@media(max-width:580px){.two-col{grid-template-columns:1fr}}
 
-  /* Answer */
-  #results { display: none; }
-  .answer-card { background: linear-gradient(135deg, #1a365d, #2b6cb0); border-radius: 14px; padding: 24px 28px; color: white; margin-bottom: 20px; }
-  .answer-card .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.65; margin-bottom: 10px; }
-  .answer-text { font-size: 15px; line-height: 1.75; white-space: pre-wrap; }
+/* Risk */
+.risk-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid #374151;font-size:14px;line-height:1.65;color:#f3f4f6}
+.risk-item:last-child{border-bottom:none}
+.badge{padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;flex-shrink:0;margin-top:2px}
+.badge.high{background:rgba(239,68,68,0.2);color:#fca5a5}
+.badge.medium{background:rgba(251,191,36,0.2);color:#fcd34d}
+.badge.low{background:rgba(52,211,153,0.2);color:#6ee7b7}
 
-  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media(max-width:600px){ .two-col { grid-template-columns: 1fr; } }
+/* Recommendation */
+.rec-item{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #374151;font-size:14px;line-height:1.65;color:#f3f4f6}
+.rec-item:last-child{border-bottom:none}
+.rec-num{width:24px;height:24px;background:#374151;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#e5e7eb;flex-shrink:0;margin-top:1px}
 
-  .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #718096; font-weight: 600; margin-bottom: 12px; }
+/* Details toggle */
+.details-toggle{width:100%;text-align:center;padding:9px;font-size:12px;color:#9ca3af;cursor:pointer;border:none;background:none;border-top:1px solid #374151;margin-top:4px;transition:color 0.15s}
+.details-toggle:hover{color:#f3f4f6}
+.db-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+@media(max-width:580px){.db-grid{grid-template-columns:1fr}}
+.db-card{background:#111827;border-radius:8px;padding:14px 16px;border:1px solid #4b5563}
+.db-card-title{font-weight:700;margin-bottom:10px;font-size:13px;color:#f9fafb;padding-bottom:6px;border-bottom:1px solid #374151}
+.db-krow{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #374151;font-size:12px}
+.db-krow:last-child{border-bottom:none}
+.db-krow-label{color:#d1d5db}
+.db-krow-val{font-weight:600;color:#f3f4f6}
+.sq-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;margin-bottom:16px}
+.sq-item{display:flex;align-items:flex-start;gap:8px;font-size:12px;line-height:1.5;color:#d1d5db}
+.dbtag{padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600;white-space:nowrap;flex-shrink:0;margin-top:2px}
+.supply_history_db{background:rgba(239,68,68,0.15);color:#f87171}
+.rwh_db{background:rgba(52,211,153,0.15);color:#34d399}
+.demand_db{background:rgba(59,130,246,0.15);color:#60a5fa}
+.rules_db{background:rgba(251,191,36,0.15);color:#fbbf24}
+.ward_db{background:rgba(167,139,250,0.15);color:#a78bfa}
+.reservoir_db{background:rgba(45,212,191,0.15);color:#2dd4bf}
 
-  .sq-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid #f7fafc; font-size: 13px; line-height: 1.5; }
-  .sq-item:last-child { border-bottom: none; }
-  .db-tag { padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; white-space: nowrap; flex-shrink: 0; margin-top: 2px; }
-  .reservoir_db { background:#ebf8ff; color:#2b6cb0; }
-  .demand_db    { background:#f0fff4; color:#276749; }
-  .rules_db     { background:#fffbeb; color:#975a16; }
-
-  .db-result-item { padding: 10px 0; border-bottom: 1px solid #f7fafc; font-size: 12px; }
-  .db-result-item:last-child { border-bottom: none; }
-  .db-result-label { font-weight: 600; color: #4a5568; margin-bottom: 4px; }
-  .db-result-values { color: #718096; line-height: 1.6; }
-
-  #error-msg { display: none; background: #fff5f5; border: 1px solid #feb2b2; color: #9b2c2c; border-radius: 12px; padding: 14px 18px; font-size: 13px; margin-bottom: 20px; }
-
-  /* groq badge */
-  .groq-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; color: #2b6cb0; background: #ebf8ff; border: 1px solid #bee3f8; border-radius: 20px; padding: 2px 8px; }
+/* Error */
+#error-msg{display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:10px;padding:12px 16px;font-size:13px;margin-bottom:14px}
 </style>
 </head>
 <body>
+<div class="page">
 
-<header>
+<div class="header">
   <div class="logo">💧</div>
   <div>
     <h1>BWSSB Water Distribution AI</h1>
-    <p>AI-powered water release planning — local DBs · LLM Powered</p>
+    <p>AI-powered water release planning · local DBs</p>
   </div>
-</header>
+  <div class="provider-badge" id="provider-badge">⚡ LLM Powered</div>
+</div>
 
-<div class="container">
+<div class="card">
+  <div class="field-label">Ask a water distribution question</div>
+  <div class="input-row">
+    <input class="qinput" id="query-input"
+           placeholder="e.g. What is the water quantity to be released to Jayanagar tomorrow?"
+           value="What is the water quantity to be released to Jayanagar tomorrow?">
+    <button class="btn-analyse" id="submit-btn" onclick="runQuery()">Analyse →</button>
+  </div>
+  <div class="chips">
+    <span class="chip" onclick="setQ(this)">Release quantity for Koramangala tomorrow</span>
+    <span class="chip" onclick="setQ(this)">Is there a water deficit in HSR Layout?</span>
+    <span class="chip" onclick="setQ(this)">Current reservoir levels and inflow</span>
+    <span class="chip" onclick="setQ(this)">Release policy limits for BTM Layout</span>
+  </div>
+</div>
+
+<div class="card" id="pipeline" style="display:none">
+  <div class="pipeline">
+    <div class="step" id="s1"><div class="dot">1</div><div class="step-lbl">Understand<br>question</div></div>
+    <div class="step" id="s2"><div class="dot">2</div><div class="step-lbl">Query<br>DBs</div></div>
+    <div class="step" id="s3"><div class="dot">3</div><div class="step-lbl">Summarise</div></div>
+    <div class="step" id="s4"><div class="dot">4</div><div class="step-lbl">Answer<br>ready</div></div>
+  </div>
+</div>
+
+<div id="error-msg"></div>
+
+<div id="results">
+
+  <div class="metric-grid" id="metric-grid"></div>
+
+  <div class="direct-card">
+    <div class="da-label">Direct answer</div>
+    <div class="da-text" id="direct-answer"></div>
+  </div>
 
   <div class="card">
-    <label class="field-label">Ask a water distribution question</label>
-    <div class="input-row">
-      <input id="query-input" type="text"
-             placeholder="e.g. What is the water quantity to be released to Jayanagar tomorrow?"
-             value="What is the water quantity to be released to Jayanagar tomorrow?">
-      <button id="submit-btn" onclick="runQuery()">Analyse →</button>
+    <div class="section-title">Key factors</div>
+    <div id="key-factors"></div>
+  </div>
+
+  <div class="two-col">
+    <div class="card">
+      <div class="section-title">Risk assessment</div>
+      <div id="risk-assessment"></div>
     </div>
-    <div class="suggestions">
-      <span class="chip" onclick="setQ(this)">Release quantity for Koramangala tomorrow</span>
-      <span class="chip" onclick="setQ(this)">Is there a water deficit in HSR Layout?</span>
-      <span class="chip" onclick="setQ(this)">Current reservoir levels and inflow</span>
-      <span class="chip" onclick="setQ(this)">Release policy limits for BTM Layout</span>
+    <div class="card">
+      <div class="section-title">Recommendation</div>
+      <div id="recommendation"></div>
     </div>
   </div>
 
-  <div id="error-msg"></div>
-
-  <div id="pipeline" class="card">
-    <div class="steps">
-      <div class="step" id="s1"><div class="dot">1</div><div class="step-lbl">Understand<br>Question</div></div>
-      <div class="step" id="s2"><div class="dot">2</div><div class="step-lbl">Query<br>DBs</div></div>
-      <div class="step" id="s3"><div class="dot">3</div><div class="step-lbl">Summarise<br></div></div>
-      <div class="step" id="s4"><div class="dot">4</div><div class="step-lbl">Answer<br>ready</div></div>
+  <div class="card" style="padding-bottom:0">
+    <div class="section-title">Sub-questions &amp; database answers</div>
+    <div id="details-content" style="display:none">
+      <div id="sub-q-panel"></div>
     </div>
+    <button class="details-toggle" id="details-btn" onclick="toggleDetails()">Show details ▾</button>
   </div>
 
-  <div id="results">
-    <div class="answer-card">
-      <div class="label">AI Recommendation </div>
-      <div class="answer-text" id="final-answer"></div>
-    </div>
-
-    <div class="two-col">
-      <div class="card">
-        <div class="section-title">Sub-questions</div>
-        <div id="sub-questions-list"></div>
-      </div>
-      <div class="card">
-        <div class="section-title">Database answers</div>
-        <div id="db-results-list"></div>
-      </div>
-    </div>
-  </div>
-
+</div>
 </div>
 
 <script>
 const API = 'http://localhost:8000';
+let detailsOpen = false;
 
-function setQ(el) { document.getElementById('query-input').value = el.textContent; }
+function setQ(el) {
+  document.getElementById('query-input').value = el.textContent.trim();
+}
 
 function setStep(n) {
   for (let i = 1; i <= 4; i++) {
-    const el = document.getElementById(`s${i}`);
-    el.classList.remove('active','done');
-    if (i < n)  el.classList.add('done');
+    const el = document.getElementById('s' + i);
+    el.classList.remove('active', 'done');
+    if (i < n) el.classList.add('done');
     if (i === n) el.classList.add('active');
   }
 }
 
-
-function fmtDbData(result) {
-
-  if (!result) {
-    return `<span style="color:red">No result</span>`;
+function allDone() {
+  for (let i = 1; i <= 4; i++) {
+    const el = document.getElementById('s' + i);
+    el.classList.remove('active');
+    el.classList.add('done');
   }
-
-  const data = result.data || {};
-  const question = (result.question || "").toLowerCase();
-
-  if (data.error) {
-    return `
-      <span style="color:#e53e3e">
-        ${data.error}
-      </span>
-    `;
-  }
-
-  // --------------------------------------------------
-  // Reservoir Questions
-  // --------------------------------------------------
-
-  if (question.includes("reservoir")) {
-
-    return `
-      <div><b>Reservoir Level:</b> ${data.reservoir_level_pct ?? '-'}%</div>
-      <div><b>Inflow:</b> ${data.inflow_mld ?? '-'} MLD</div>
-      <div><b>Temperature:</b> ${data.temp_c ?? '-'}°C</div>
-      <div><b>Rainfall:</b> ${data.rainfall_mm ?? '-'} mm</div>
-    `;
-  }
-
-  // --------------------------------------------------
-  // Demand Questions
-  // --------------------------------------------------
-
-  if (question.includes("demand")) {
-
-    return `
-      <div><b>Projected Demand:</b> ${data.demand_mld ?? '-'} MLD</div>
-      <div><b>Actual Supply:</b> ${data.actual_supply_mld ?? '-'} MLD</div>
-      <div><b>Deficit:</b> ${data.deficit_mld ?? '-'} MLD</div>
-    `;
-  }
-
-  // --------------------------------------------------
-  // Release / Policy Questions
-  // --------------------------------------------------
-
-  if (
-      question.includes("release") ||
-      question.includes("policy") ||
-      question.includes("limit")
-  ) {
-
-    return `
-      <div><b>Minimum Release:</b> ${data.min_release_mld ?? '-'} MLD</div>
-      <div><b>Maximum Release:</b> ${data.max_release_mld ?? '-'} MLD</div>
-      <div><b>Priority Level:</b> ${data.priority_level ?? '-'}</div>
-    `;
-  }
-
-  // --------------------------------------------------
-  // Ward / Groundwater Questions
-  // --------------------------------------------------
-
-  if (
-      question.includes("groundwater") ||
-      question.includes("ward") ||
-      question.includes("gwl")
-  ) {
-
-    return `
-      <div><b>Ward:</b> ${data.ward_name ?? '-'}</div>
-      <div><b>Ward No:</b> ${data.ward_no ?? '-'}</div>
-      <div><b>Population:</b> ${data.population ?? '-'}</div>
-      <div><b>Groundwater Level:</b> ${data.avg_annual_gwl_m ?? '-'} m</div>
-      <div><b>Monthly Rainfall:</b> ${data.avg_monthly_rainfall_mm ?? '-'} mm</div>
-      <div><b>Temperature:</b> ${data.avg_t2m_max_c ?? '-'}°C</div>
-    `;
-  }
-
-  // --------------------------------------------------
-  // Rainfall Questions
-  // --------------------------------------------------
-
-  if (question.includes("rainfall")) {
-
-    return `
-      <div><b>Average Rainfall:</b> ${data.avg_monthly_rainfall_mm ?? '-'} mm</div>
-      <div><b>Temperature:</b> ${data.avg_t2m_max_c ?? '-'}°C</div>
-    `;
-  }
-
-  // --------------------------------------------------
-  // Population Questions
-  // --------------------------------------------------
-
-  if (question.includes("population")) {
-
-    return `
-      <div><b>Ward:</b> ${data.ward_name ?? '-'}</div>
-      <div><b>Population:</b> ${data.population ?? '-'}</div>
-    `;
-  }
-
-  // --------------------------------------------------
-  // Generic Fallback
-  // --------------------------------------------------
-
-  return `
-    <pre style="white-space:pre-wrap">
-${JSON.stringify(data, null, 2)}
-    </pre>
-  `;
 }
 
+function toggleDetails() {
+  detailsOpen = !detailsOpen;
+  document.getElementById('details-content').style.display = detailsOpen ? 'block' : 'none';
+  document.getElementById('details-btn').textContent = detailsOpen ? 'Hide details ▴' : 'Show details ▾';
+}
 
+function renderMetrics(da, kf, isRelease) {
+  const grid = document.getElementById('metric-grid');
+  // Only show metrics for release queries
+  if (!isRelease) { grid.innerHTML = ''; return; }
+  const metrics = [];
+  if (da.toLowerCase().includes('does not need') || da.toLowerCase().includes('valve need not')) {
+    const mav  = (kf||'').match(/Total available\s*=?\s*([\d.-]+)\s*lpcd/i);
+    const mrwh = (kf||'').match(/RWH contribution\s*=?\s*([\d.]+)\s*lpcd/i);
+    if (mav)  metrics.push({ label: 'Total available',  value: mav[1],  unit: 'lpcd' });
+    if (mrwh) metrics.push({ label: 'RWH contribution', value: mrwh[1], unit: 'lpcd' });
+    metrics.push({ label: 'Release required', value: '0', unit: 'MLD' });
+    metrics.push({ label: 'Valve hours',      value: '0', unit: 'hrs' });
+  } else {
+    const mhours = da.match(/(\d+\.?\d*)\s*hours/i);
+    const mmld   = da.match(/(\d+\.?\d*)\s*MLD/i);
+    const mlpcd  = da.match(/\((\d+\.?\d*)\s*lpcd equivalent\)/i);
+    const rwh    = (kf||'').match(/RWH contribution\s*=?\s*([\d.]+)\s*lpcd/i);
+    if (mhours) metrics.push({ label: 'Valve open',      value: mhours[1], unit: 'hrs' });
+    if (mmld)   metrics.push({ label: 'Final release',   value: mmld[1],   unit: 'MLD' });
+    if (mlpcd)  metrics.push({ label: 'lpcd equivalent', value: mlpcd[1],  unit: 'lpcd' });
+    if (rwh)    metrics.push({ label: 'RWH contribution',value: rwh[1],    unit: 'lpcd' });
+  }
+  grid.innerHTML = metrics.slice(0, 4).map(m => `
+    <div class="metric">
+      <div class="metric-label">${m.label}</div>
+      <div class="metric-value">${m.value}<span class="metric-unit">${m.unit}</span></div>
+    </div>`).join('');
+}
+
+function renderKeyFactors(text) {
+  const el = document.getElementById('key-factors');
+  if (!text) { el.innerHTML = '<p style="color:#6b7280;font-size:13px">No key factors available</p>'; return; }
+
+  const hasSteps = /^Step\s*\d+\s*[\u2014\u2013-]/im.test(text);
+
+  if (hasSteps) {
+    const lines = text.split('\n');
+    let html = '', inStep = false, inRows = false;
+    for (const raw of lines) {
+      const line = raw.trimEnd();
+      const stepMatch = line.match(/^Step\s*(\d+)\s*[\u2014\u2013-]\s*(.+)/i);
+      if (stepMatch) {
+        if (inRows) { html += '</div>'; inRows = false; }
+        if (inStep) { html += '</div>'; }
+        html += `<div class="step-block"><div class="step-head"><span class="step-num">${stepMatch[1]}</span>${stepMatch[2]}</div>`;
+        inStep = true; continue;
+      }
+      const formulaMatch = line.match(/^\s*(formula:.*)/i);
+      if (formulaMatch && inStep) { html += `<div class="step-formula">${formulaMatch[1]}</div>`; continue; }
+      const resultMatch = line.match(/^\s+(Total available|Water to release|Final release|Valve open duration|Required release|Release volume|Demand \(norm\))\s*=\s*(.+)/i);
+      if (resultMatch && inStep) {
+        if (inRows) { html += '</div>'; inRows = false; }
+        const isDemand = /demand.*norm/i.test(resultMatch[1]);
+        const bcolor = isDemand ? '#4b5563' : '#3b82f6';
+        html += `<div class="result-row" style="border-left-color:${bcolor}"><span class="rl">${resultMatch[1]}</span><span class="rv">${resultMatch[2]}</span></div>`;
+        continue;
+      }
+      const rowMatch = line.match(/^\s{2,}([^=\n]+?)\s{2,}=\s*(.+)/);
+      if (rowMatch && inStep) {
+        if (!inRows) { html += '<div class="rows">'; inRows = true; }
+        const lbl = rowMatch[1].trim();
+        const val = rowMatch[2];
+        let cls = (val.startsWith('-')||val.startsWith('\u2212')) ? 'kf-neg' : /rwh|rainfall/i.test(lbl) ? 'kf-info' : '';
+        html += `<div class="kf-row"><span class="kf-label">${lbl}</span><span class="kf-val ${cls}">${val}</span></div>`;
+        continue;
+      }
+      if (/^(SUPPORTING DATA|Supporting data)/i.test(line)) {
+        if (inRows) { html += '</div>'; inRows = false; }
+        if (inStep) { html += '</div>'; inStep = false; }
+        html += '<div class="kf-divider"></div>'; continue;
+      }
+      if (line.trim() === '' && inStep) {
+        if (inRows) { html += '</div>'; inRows = false; }
+        html += '<div class="kf-divider"></div>'; continue;
+      }
+      if (line.trim() && inStep) {
+        if (inRows) { html += '</div>'; inRows = false; }
+        html += `<p class="step-prose">${line.trim()}</p>`;
+      }
+    }
+    if (inRows) html += '</div>';
+    if (inStep) html += '</div>';
+    el.innerHTML = html;
+
+  } else {
+    // General query: explanatory bullet points — dot icon + full sentence with context
+    const lines = text.split('\n').filter(l => l.trim());
+    const validLines = lines.filter(l => l.trim());
+    let html = '';
+    validLines.forEach((line, i) => {
+      const clean = line.replace(/^[•\-\u2022\u00b7]\s*/, '').trim();
+      if (!clean) return;
+      const last = i === validLines.length - 1;
+      html += `<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;${last ? '' : 'border-bottom:1px solid #374151'}">
+        <span style="color:#6b7280;font-size:16px;line-height:1;flex-shrink:0;margin-top:1px">•</span>
+        <span style="font-size:13px;color:#d1d5db;line-height:1.7">${clean}</span>
+      </div>`;
+    });
+    el.innerHTML = html || `<p style="font-size:13px;color:#9ca3af">${text}</p>`;
+  }
+}
+
+function renderRisk(text) {
+  const el = document.getElementById('risk-assessment');
+  if (!text) { el.innerHTML = '<p style="color:#6b7280;font-size:13px">No risks identified</p>'; return; }
+  const items = text.split('\n').filter(l => l.trim());
+  let html = '';
+  for (const item of items) {
+    // Strip leading bullets, asterisks, dashes
+    let clean = item.replace(/^[\*\-•·]\s*/, '').trim();
+
+    // Detect severity — check for all common Gemini/Groq formats:
+    // "HIGH severity", "(HIGH severity)", "— HIGH", "- HIGH", ": HIGH"
+    let sev = 'low';
+    if (/\b(high)\b/i.test(clean)) sev = 'high';
+    else if (/\b(medium)\b/i.test(clean)) sev = 'medium';
+
+    // Remove severity indicators from the displayed text
+    clean = clean
+      .replace(/\s*\((LOW|MEDIUM|HIGH)\s*(severity)?\)/gi, '')   // (HIGH severity) or (HIGH)
+      .replace(/\s*\(?(LOW|MEDIUM|HIGH)\s*severity\)?/gi, '')     // HIGH severity standalone
+      .replace(/\s*[-–]\s*(LOW|MEDIUM|HIGH)\b/gi, '')             // — HIGH or - HIGH
+      .replace(/:\s*(LOW|MEDIUM|HIGH)\b/gi, ':')                  // : HIGH
+      clean = clean.replace(/\s{2,}/g, ' ').replace(/:\s+\(/g, ': (').trim();
+
+    // Clean trailing punctuation left over
+    clean = clean.replace(/[:\-–,]+\s*$/, '').trim();
+
+    if (!clean) continue;
+    html += `<div class="risk-item"><span class="badge ${sev}">${sev.charAt(0).toUpperCase()+sev.slice(1)}</span><span>${clean}</span></div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderRec(text) {
+  const el = document.getElementById('recommendation');
+  if (!text) { el.innerHTML = '<p style="color:#6b7280;font-size:13px">No recommendations</p>'; return; }
+  const items = text.split('\n').filter(l => l.trim());
+  let html = '', n = 1;
+  for (const item of items) {
+    const clean = item.replace(/^\d+\.\s*/, '');
+    html += `<div class="rec-item"><span class="rec-num">${n++}</span><span>${clean}</span></div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderSubQ(sq, dbr) {
+  let html = '';
+  if (sq && sq.length) {
+    html += '<div class="sq-list">';
+    for (const s of sq) {
+      const db = (s.db||'').replace(/_db$/, '');
+      html += `<div class="sq-item"><span class="dbtag ${s.db||''}">${db}</span><span>${s.question||''}</span></div>`;
+    }
+    html += '</div>';
+  }
+  if (dbr && dbr.length) {
+    html += '<div class="db-grid">';
+    for (const r of dbr) {
+      const data = r.data || {};
+      if (data.error) {
+        html += `<div class="db-card"><div class="db-card-title">${(r.db||'').replace(/_db$/,' DB')}</div><p style="color:#f87171;font-size:12px">${data.error}</p></div>`;
+        continue;
+      }
+      const entries = Object.entries(data)
+        .filter(([k]) => !['monthly_gwl','trend_7d','thresholds'].includes(k))
+        .slice(0, 8);
+      html += `<div class="db-card"><div class="db-card-title">${(r.db||'').replace(/_db$/,' DB')}${r.zone?' · '+r.zone:''}</div>`;
+      for (const [k, v] of entries) {
+        if (v === null || v === undefined) continue;
+        const label = k.replace(/_/g,' ');
+        const val = Array.isArray(v) ? v.join(', ') : String(v);
+        html += `<div class="db-krow"><span class="db-krow-label">${label}</span><span class="db-krow-val">${val}</span></div>`;
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+  document.getElementById('sub-q-panel').innerHTML = html;
+}
 
 async function runQuery() {
   const query = document.getElementById('query-input').value.trim();
   if (!query) return;
-
   document.getElementById('submit-btn').disabled = true;
   document.getElementById('results').style.display = 'none';
   document.getElementById('error-msg').style.display = 'none';
   document.getElementById('pipeline').style.display = 'block';
+  detailsOpen = false;
   setStep(1);
-
   const delay = ms => new Promise(r => setTimeout(r, ms));
-
   try {
     await delay(500); setStep(2);
-    await delay(600); setStep(3);
-
+    await delay(700); setStep(3);
     const resp = await fetch(`${API}/query`, {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({query})
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query })
     });
-
     if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.detail || `Server error ${resp.status}`);
+      const e = await resp.json().catch(() => ({}));
+      throw new Error(e.detail || `Server error ${resp.status}`);
     }
-
-    setStep(4);
-    await delay(300);
-
+    setStep(4); await delay(300); allDone();
     const data = await resp.json();
-
-    // Sub-questions panel
-    document.getElementById('sub-questions-list').innerHTML =
-      (data.sub_questions || []).map(sq => `
-        <div class="sq-item">
-          <span class="db-tag ${sq.db}">${sq.db.replace('_db','')}</span>
-          <span>${sq.question}</span>
-        </div>`).join('') || '<p style="color:#718096;font-size:13px">None</p>';
-
-    // DB results panel
-    document.getElementById('db-results-list').innerHTML =
-      (data.db_results || []).map(r => `
-        <div class="db-result-item">
-          <div class="db-result-label">${r.db.replace('_db','')} DB${r.zone ? ' · '+r.zone : ''}</div>
-          <div class="db-result-values">${fmtDbData(r)}</div>
-        </div>`).join('') || '<p style="color:#718096;font-size:13px">None</p>';
-
-    // Final answer
-    document.getElementById('final-answer').textContent = data.final_answer;
-
-    // Mark all done
-    for (let i = 1; i <= 4; i++) {
-      const el = document.getElementById(`s${i}`);
-      el.classList.remove('active'); el.classList.add('done');
-    }
-
+    fetch(`${API}/health`).then(r => r.json()).then(h => {
+      if (h.active_provider)
+        document.getElementById('provider-badge').textContent =
+          `⚡ ${h.active_provider} · ${(h.active_model||'').split('-')[0]}`;
+    }).catch(() => {});
+    const isRelease = /release|valve|quantity to release|how much water|supply tomorrow|water tomorrow/i.test(query);
+    renderMetrics(data.direct_answer || '', data.key_factors || '', isRelease);
+    document.getElementById('direct-answer').textContent = data.direct_answer || '';
+    renderKeyFactors(data.key_factors || '');
+    renderRisk(data.risk_assessment || '');
+    renderRec(data.recommendation || '');
+    renderSubQ(data.sub_questions, data.db_results);
+    document.getElementById('details-content').style.display = 'none';
+    document.getElementById('details-btn').textContent = 'Show details ▾';
     document.getElementById('results').style.display = 'block';
-
   } catch (err) {
     document.getElementById('pipeline').style.display = 'none';
     const e = document.getElementById('error-msg');
     e.style.display = 'block';
-    e.textContent = `Error: ${err.message}. Make sure the orchestrator is running on localhost:8000 and your API_KEY is set in .env`;
+    e.textContent = `Error: ${err.message}. Make sure the orchestrator is running on localhost:8000 and your API key is set in .env`;
   }
-
   document.getElementById('submit-btn').disabled = false;
 }
 

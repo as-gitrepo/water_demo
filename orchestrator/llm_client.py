@@ -96,18 +96,13 @@ class GeminiProvider(LLMProvider):
                 "system_instruction": {"parts": [{"text": system_prompt}]},
                 "contents": [{"parts": [{"text": user_message}]}],
                 "generationConfig": {
-                    "temperature":     0,
+                    "temperature":     temperature,
                     "maxOutputTokens": 6000
-
                 }
             },
-            timeout=60
+            timeout=70
         )
         _raise_for_status(resp, "Gemini")
-        print("\n========== SUMMARY OUTPUT ==========")
-        print(resp.json())
-        print("===================================\n")
-
         return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 
@@ -175,81 +170,6 @@ class AnthropicProvider(LLMProvider):
         _raise_for_status(resp, "Anthropic")
         return resp.json()["content"][0]["text"].strip()
 
-import os
-import requests
-
-
-class OpenRouterProvider:
-    def _check_key(self):
-        if not os.getenv("OPENROUTER_API_KEY"):
-            raise ValueError(
-                "OPENROUTER_API_KEY not found in .env"
-            )
-
-    def call(
-        self,
-        system_prompt,
-        user_message,
-        temperature=0,
-        max_tokens=1000
-    ):
-
-        self._check_key()
-
-        model = os.getenv(
-            "OPENROUTER_MODEL",
-            "~google/gemini-flash-latest"
-        )
-
-        print(f"  [provider] OpenRouter → {model}")
-
-        payload = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": user_message
-                }
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens
-        }
-
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization":
-                    f"Bearer {os.environ['OPENROUTER_API_KEY']}",
-                "Content-Type":
-                    "application/json",
-                "HTTP-Referer":
-                    "http://localhost:8000",
-                "X-Title":
-                    "Water Release Demo"
-            },
-            json=payload,
-            timeout=60
-        )
-
-        if response.status_code != 200:
-            raise Exception(
-                f"OpenRouter API error "
-                f"{response.status_code}: "
-                f"{response.text}"
-            )
-
-        data = response.json()
-
-        return (
-            data["choices"][0]
-                ["message"]
-                ["content"]
-                .strip()
-        )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FACTORY — reads LLM_PROVIDER from .env and returns the right provider
@@ -260,7 +180,6 @@ PROVIDERS = {
     "gemini":    GeminiProvider,
     "openai":    OpenAIProvider,
     "anthropic": AnthropicProvider,
-    "openrouter": OpenRouterProvider
 }
 
 def _get_provider() -> LLMProvider:
@@ -282,9 +201,15 @@ def _raise_for_status(resp, provider_name: str):
     if resp.status_code == 401:
         raise RuntimeError(f"Invalid API key for {provider_name}. Check your .env file.")
     if resp.status_code == 429:
-        raise RuntimeError(f"{provider_name} rate limit hit. Wait 10 seconds and retry.")
+        # Signal retry — caught by call_llm
+        raise RateLimitError(f"{provider_name} rate limit hit.")
     if not resp.ok:
         raise RuntimeError(f"{provider_name} API error {resp.status_code}: {resp.text}")
+
+
+class RateLimitError(Exception):
+    """Raised on 429 — signals call_llm to retry with backoff."""
+    pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -302,10 +227,14 @@ def call_llm(system_prompt: str,
     Call the configured LLM provider and return the response text.
     Provider is set via LLM_PROVIDER in .env (default: groq).
     Results are cached by default.
+    Automatically retries up to 3 times on rate limit (429) with backoff.
     """
+    import time
+
     provider_name = os.environ.get("LLM_PROVIDER", "groq").lower()
     cache_key = cache_key_override if cache_key_override else make_key("llm", user_message)
 
+    # ── Cache check ───────────────────────────────────────────────────────────
     if use_cache:
         cached = get(cache_key)
         if cached:
@@ -313,15 +242,40 @@ def call_llm(system_prompt: str,
             return cached
         print(f"  [cache MISS] key={cache_key[:12]}... — calling {provider_name}")
 
-    try:
-        provider = _get_provider()
-        result   = provider.call(system_prompt, user_message, temperature, max_tokens)
-    except requests.exceptions.ConnectionError:
+    # ── Call with retry on rate limit ─────────────────────────────────────────
+    # Backoff: 15s → 30s → 60s  (Gemini free tier resets every 60s)
+    retry_waits = [15, 30, 60]
+    last_error  = None
+
+    for attempt, wait in enumerate(retry_waits, start=1):
+        try:
+            provider = _get_provider()
+            result   = provider.call(system_prompt, user_message, temperature, max_tokens)
+            break   # success — exit retry loop
+
+        except RateLimitError as e:
+            last_error = e
+            if attempt <= len(retry_waits):
+                print(f"  [rate limit] attempt {attempt} — waiting {wait}s before retry...")
+                time.sleep(wait)
+            continue
+
+        except requests.exceptions.ConnectionError:
+            raise RuntimeError(
+                f"Cannot reach {provider_name} API. Check your internet connection.\n"
+                "Tip: if on venue WiFi, switch to your mobile hotspot."
+            )
+    else:
+        # All retries exhausted
         raise RuntimeError(
-            f"Cannot reach {provider_name} API. Check your internet connection.\n"
-            "Tip: if on venue WiFi, switch to your mobile hotspot."
+            f"Rate limit persists after 3 retries ({sum(retry_waits)}s total wait).\n"
+            f"Options:\n"
+            f"  1. Switch to Groq: set LLM_PROVIDER=groq in .env (faster + higher limits)\n"
+            f"  2. Upgrade Gemini to paid tier at https://ai.google.dev/pricing\n"
+            f"  3. Wait 60 seconds and try again"
         )
 
+    # ── Cache the result ──────────────────────────────────────────────────────
     if use_cache:
         set(cache_key, result, ttl)
         print(f"  [cache SET]  key={cache_key[:12]}... ttl={ttl}s")
@@ -330,24 +284,51 @@ def call_llm(system_prompt: str,
 
 
 def parse_json_response(raw: str):
-    """Robustly extract JSON from LLM response — handles markdown fences."""
+    """
+    Robustly extract JSON from LLM response.
+    Handles: markdown fences, thinking/reasoning preamble,
+    trailing commentary, and mixed text+JSON (common in Gemini).
+    """
+    if not raw:
+        raise ValueError("Empty response from LLM")
+
+    # Step 1: Extract content inside ```json ... ``` fences if present
     if "```" in raw:
         parts = raw.split("```")
         for part in parts:
             part = part.strip()
-            if part.startswith("json"):
+            if part.lower().startswith("json"):
                 part = part[4:].strip()
             if part.startswith("[") or part.startswith("{"):
-                raw = part
-                break
+                try:
+                    return json.loads(part)
+                except json.JSONDecodeError:
+                    pass  # try next part
 
+    # Step 2: Find the outermost [ ] or { } — handles preamble/postamble text
+    # Try array first (expected for decompose), then object
     for start_char, end_char in [("[", "]"), ("{", "}")]:
         start = raw.find(start_char)
-        end   = raw.rfind(end_char) + 1
-        if start != -1 and end > 0:
+        if start == -1:
+            continue
+        # Walk backwards from end to find matching closing bracket
+        depth = 0
+        end   = -1
+        for i, ch in enumerate(raw[start:], start=start):
+            if ch == start_char:
+                depth += 1
+            elif ch == end_char:
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        if end != -1:
             try:
                 return json.loads(raw[start:end])
             except json.JSONDecodeError:
                 continue
 
-    raise ValueError(f"Could not extract JSON from LLM response:\n{raw}")
+    raise ValueError(
+        f"Could not extract JSON from LLM response.\n"
+        f"Raw response (first 300 chars):\n{raw[:300]}"
+    )

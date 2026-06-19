@@ -14,9 +14,9 @@ import json, hashlib, os, time
 CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "cache.json")
 
 # TTL in seconds
-TTL_LLM_DECOMPOSE  = 60 * 60 * 24   # 24 hours — same query always gives same sub-questions
-TTL_LLM_SUMMARISE  = 60 * 60 * 5    # 2 hours  — summarisation can depend on fresh DB data
-TTL_DB_QUERY       = 60 * 30        # 30 mins  — DB data is seeded, won't change mid-demo
+TTL_LLM_DECOMPOSE  = 60 * 60 * 24 * 7  # 7 days  — sub-questions for same query never change
+TTL_LLM_SUMMARISE  = 60 * 60 * 24      # 24 hours — summary stable within a day
+TTL_DB_QUERY       = 60 * 60           # 1 hour   — DB data changes slowly
 
 
 def _load():
@@ -75,9 +75,14 @@ def clear():
 def stats():
     """Return cache stats — useful for the /cache/stats endpoint."""
     store = _load()
-    now = time.time()
+    now   = time.time()
     total   = len(store)
     alive   = sum(1 for e in store.values() if e["expires_at"] > now)
     expired = total - alive
-    return {"total_entries": total, "alive": alive, "expired": expired,
-            "cache_file": CACHE_FILE}
+    return {
+        "total_entries": total,
+        "alive":         alive,
+        "expired":       expired,
+        "api_calls_saved": alive,   # every alive entry = one saved API call
+        "cache_file":    CACHE_FILE
+    }
