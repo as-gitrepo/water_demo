@@ -156,7 +156,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
     <span class="chip" onclick="setQ(this)">Release quantity for Koramangala tomorrow</span>
     <span class="chip" onclick="setQ(this)">Is there a water deficit in HSR Layout?</span>
     <span class="chip" onclick="setQ(this)">Current reservoir levels and inflow</span>
-    <span class="chip" onclick="setQ(this)">Release policy limits for BTM Layout</span>
+    <span class="chip" onclick="setQ(this)">Water policy limits for BTM Layout</span>
   </div>
 </div>
 
@@ -266,9 +266,39 @@ function renderMetrics(da, kf, isRelease) {
     </div>`).join('');
 }
 
+function normalizeKF(text) {
+  // Normalize Gemini prose output to structured label = value format
+  // Handles: "Release volume is X litres (Y MLD)", "Calculated X MLD is below...", etc.
+  return text
+    // "Release volume is X litres (Y MLD)" -> "  Release volume  =  X litres (Y MLD)"
+    .replace(/Release volume is ([\d,.]+ litres[^\n]*)/gi, '  Release volume  =  $1')
+    // "Water to release is X lpcd" -> "  Water to release  =  X lpcd"
+    .replace(/Water to release is ([\d.,\-− =lpcdMLD]+)/gi, '  Water to release  =  $1')
+    // "Calculated X MLD is below/above policy minimum/maximum — final release set to Y MLD (Z lpcd equivalent)"
+    // Capture group 1 stops BEFORE "— final release" so it doesn't swallow that part
+    .replace(/Calculated ([\d.]+ MLD is (?:below|above) [^—\n]+)(?:—\s*)?(?:final )?release set to ([\d.]+\s*MLD[^\n]*)/gi,
+      '  Policy state  =  Calculated $1\n  Final release  =  $2')
+    .replace(/Calculated ([\d.]+ MLD exceeds [^—\n]+)(?:—\s*)?(?:final )?release set to ([\d.]+\s*MLD[^\n]*)/gi,
+      '  Policy state  =  Calculated $1\n  Final release  =  $2')
+    // Fallback — Calculated line with no "release set to" portion (rare)
+    .replace(/^(\s*)Calculated ([\d.]+ MLD is (?:below|above)[^\n]+)$/gim, '$1  Policy state  =  Calculated $2')
+    // "Policy limits: Min X MLD, Max Y MLD" -> kf-row
+    .replace(/Policy limits?:?\s*(Min[^\n]+)/gi, '  Policy limits  =  $1')
+    // Standalone "Final release is X MLD" / "Final release set to X MLD" (when not already handled above)
+    .replace(/^(\s*)Final release (?:is |set to )([\d.]+\s*MLD[^\n]*)$/gim, '$1  Final release  =  $2')
+    // "The release volume is..." prose cleanup
+    .replace(/The release volume is ([\d,.]+ litres[^\n]*)/gi, '  Release volume  =  $1')
+    // "X litres ÷ Y lph = Z hours" — valve hours line (label must say "Valve open duration" to match resultMatch)
+    .replace(/^(\s*)([\d,]+ litres\s*[÷\/]\s*[\d,.]+ lph\s*=\s*[\d.]+ hours)/gim, '$1  Valve open duration  =  $2');
+}
+
 function renderKeyFactors(text) {
   const el = document.getElementById('key-factors');
   if (!text) { el.innerHTML = '<p style="color:#888;font-size:15px">No key factors available</p>'; return; }
+
+  // Normalize Gemini prose output before parsing
+  text = normalizeKF(text);
+
   const hasSteps = /^Step\s*\d+\s*[\u2014\u2013-]/im.test(text);
   if (hasSteps) {
     const lines = text.split('\n');
@@ -284,7 +314,7 @@ function renderKeyFactors(text) {
       }
       const formulaMatch = line.match(/^\s*(formula:.*)/i);
       if (formulaMatch && inStep) { html += `<div class="step-formula">${formulaMatch[1]}</div>`; continue; }
-      const resultMatch = line.match(/^\s+(Total available|Water to release|Final release|Valve open duration|Required release|Release volume|Demand \(norm\)|RWH per capita|RWH volume \(a×b×c\)|RWH volume in litres)\s*=\s*(.+)/i);
+      const resultMatch = line.match(/^\s+(Total available|Water to release|Final release|Valve open(?: duration)?|Required release|Release volume|Demand \(norm\)|RWH per capita|RWH volume \(a[×x]b[×x]c\)|RWH volume in litres|Policy state|Policy limits)\s*=\s*(.+)/i);
       if (resultMatch && inStep) {
         if (inRows) { html += '</div>'; inRows = false; }
         html += `<div class="result-row"><span class="rl">${resultMatch[1]}</span><span class="rv">${resultMatch[2]}</span></div>`;
@@ -295,7 +325,7 @@ function renderKeyFactors(text) {
         if (!inRows) { html += '<div class="rows">'; inRows = true; }
         const lbl = rowMatch[1].trim();
         const val = rowMatch[2];
-        let cls = (val.startsWith('-')||val.startsWith('\u2212')) ? 'kf-neg' : /rwh|rainfall/i.test(lbl) ? 'kf-info' : '';
+        let cls = (val.startsWith('-')||val.startsWith('\u2212')) ? 'kf-neg' : '';
         html += `<div class="kf-row"><span class="kf-label">${lbl}</span><span class="kf-val ${cls}">${val}</span></div>`;
         continue;
       }
@@ -346,10 +376,10 @@ function renderRisk(text) {
     clean = clean
       .replace(/\s*\((LOW|MEDIUM|HIGH)\s*(severity)?\)/gi, '')
       .replace(/\s*\(?(LOW|MEDIUM|HIGH)\s*severity\)?/gi, '')
-      .replace(/\s*[-–]\s*(LOW|MEDIUM|HIGH)\b/gi, '')
+      .replace(/\s*[-–—]\s*(LOW|MEDIUM|HIGH)\b/gi, '')
       .replace(/:\s*(LOW|MEDIUM|HIGH)\b/gi, ':')
       .replace(/\s{2,}/g, ' ').trim()
-      .replace(/[:\-–,]+\s*$/, '').trim();
+      .replace(/[:\-–—,]+\s*$/, '').trim();
     if (!clean) continue;
     html += `<div class="risk-item"><span class="badge ${sev}">${sev.charAt(0).toUpperCase()+sev.slice(1)}</span><span>${clean}</span></div>`;
   }

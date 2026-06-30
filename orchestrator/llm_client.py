@@ -97,7 +97,7 @@ class GeminiProvider(LLMProvider):
                 "contents": [{"parts": [{"text": user_message}]}],
                 "generationConfig": {
                     "temperature":     temperature,
-                    "maxOutputTokens": 6000
+                    "maxOutputTokens": 6500
                 }
             },
             timeout=70
