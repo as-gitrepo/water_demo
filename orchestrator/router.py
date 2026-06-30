@@ -256,8 +256,15 @@ def supply_history_tool(zone: str = "Jayanagar", date: str = "yesterday") -> dic
 @tool("rwh_tool")
 def rwh_tool(zone: str = "Jayanagar", date: str = "today") -> dict:
     """
-    Query rainwater_harvesting database for RWH house counts and tank sizes.
-    Also calculates RWH water contribution based on expected rainfall.
+    Query rainwater_harvesting database for RWH house counts and adoption %.
+    Calculates RWH water contribution using a roof-area catchment formula:
+
+      roof_area_pct   = 85% of builtup_area_percentage
+      roof_area_m2     = building_area_km2 (converted to m2) x roof_area_pct
+      runoff_coeff (c) = 0.60
+      captured_litres  = roof_area_m2 x rainfall_mm x c
+      rwh_litres       = captured_litres x rwh_adoption_pct   (scaled to RWH-enabled homes)
+      rwh_lpcd         = rwh_litres / population
     """
     print("LangChain → Rainwater Harvesting DB")
     con  = get_db("supply_db")
@@ -280,45 +287,136 @@ def rwh_tool(zone: str = "Jayanagar", date: str = "today") -> dict:
     if not row:
         return {"error": f"No RWH data found for '{zone}'"}
 
-    # Get expected rainfall from ward_db
+    # Get expected rainfall AND building/builtup area from ward_db
     ward_con = get_db("ward_db")
-    from datetime import datetime
-    month = datetime.today().month + 1  # tomorrow's month
-    if month > 12:
-        month = 1
-    rainfall_row = ward_con.execute("""
-        SELECT rainfall FROM ward_data
+    from datetime import datetime, timedelta
+    import calendar
+    tomorrow   = datetime.today() + timedelta(days=1)   # actual calendar date for "tomorrow"
+    next_month = tomorrow.month
+    next_year  = tomorrow.year
+    ward_row = ward_con.execute("""
+        SELECT rainfall, building_area_km2, builtup_area_percentage
+        FROM ward_data
         WHERE LOWER(ward_name) = ? AND year = 2025 AND month = ?
-    """, (zone_lower, month)).fetchone()
+    """, (zone_lower, next_month)).fetchone()
     ward_con.close()
 
-    expected_rainfall_mm  = rainfall_row["rainfall"] if rainfall_row else 0.0
-    threshold_mm          = row["rainfall_threshold_mm"]
-    rwh_active            = expected_rainfall_mm >= threshold_mm
+    # NOTE: the 'rainfall' column in ward_data is a MONTHLY AVERAGE (mm/month),
+    # not a daily forecast. Convert to an estimated daily rainfall for tomorrow
+    # by dividing by the number of days in that month — otherwise the RWH
+    # catchment calculation massively overestimates collected water.
+    monthly_rainfall_mm = ward_row["rainfall"] if ward_row else 0.0
+    days_in_month        = calendar.monthrange(next_year, next_month)[1]
+    expected_rainfall_mm = round(monthly_rainfall_mm / days_in_month, 2) if days_in_month else 0.0
 
-    # RWH water contribution calculation:
-    # If rainfall >= threshold: 20% of RWH tanks get filled
-    # Contribution = rwh_houses × avg_tank_size × 20%
-    rwh_contribution_litres = 0
-    if rwh_active:
-        rwh_contribution_litres = row["rwh_houses"] * row["avg_tank_size_litres"] * 0.20
+    building_area_km2       = ward_row["building_area_km2"]         if ward_row else 0.0
+    builtup_area_percentage = ward_row["builtup_area_percentage"]   if ward_row else 0.0
+
+    threshold_mm = row["rainfall_threshold_mm"]
+    rwh_pct      = row["rwh_percentage"]
+    rwh_adoption_fraction = rwh_pct / 100.0
+
+    # ── Roof-area catchment calculation ──────────────────────────────────────
+    # Formula: a (m2) x b (m, converted from mm) x c (runoff coeff) = Volume (m3)
+    # Then: Volume (m3) x 1000 = litres, finally litres / population = lpcd
+    # No threshold gate — any rainfall, however small, contributes proportionally.
+    ROOF_OF_BUILTUP    = 0.85   # 85% of builtup area is roof (rest is roads/open space)
+    RUNOFF_COEFFICIENT = 0.60   # fraction of rainfall on roof that's actually collected
+
+    building_area_m2 = building_area_km2 * 1_000_000
+    roof_area_pct     = ROOF_OF_BUILTUP * (builtup_area_percentage / 100.0)
+    a_roof_area_m2    = building_area_m2 * roof_area_pct        # a = surface area (m2)
+    roof_area_m2      = a_roof_area_m2                          # kept for backward-compat field name
+
+    b_rainfall_m = expected_rainfall_mm / 1000.0                # b = rainfall (m), converted from mm
+    c_runoff     = RUNOFF_COEFFICIENT                           # c = runoff coefficient
+
+    # Volume (m3) = a (m2) x b (m) x c — always computed, no on/off gate
+    captured_volume_m3    = a_roof_area_m2 * b_rainfall_m * c_runoff
+
+    # Convert m3 -> litres (1 m3 = 1000 litres)
+    captured_litres_total = captured_volume_m3 * 1000
+
+    # RWH is considered "active" whenever there's any measurable rainfall —
+    # used only as a display label, not a gate on the calculation
+    rwh_active = expected_rainfall_mm > 0
+
+    # Scale by RWH adoption — only homes with RWH systems actually capture this
+    rwh_contribution_litres = captured_litres_total * rwh_adoption_fraction
 
     rwh_contribution_lpcd = round(
         rwh_contribution_litres / population if population > 0 else 0, 2
-    ) if rwh_active else 0
+    )
 
     return {
         "ward_name":                  row["ward_name"],
         "total_houses":               row["total_houses"],
         "rwh_houses":                 row["rwh_houses"],
-        "rwh_percentage":             row["rwh_percentage"],
-        "avg_tank_size_litres":       row["avg_tank_size_litres"],
-        "expected_rainfall_mm":       round(expected_rainfall_mm, 2),
+        "rwh_percentage":             rwh_pct,
+        "building_area_km2":          round(building_area_km2, 4),
+        "builtup_area_percentage":    round(builtup_area_percentage, 2),
+        "roof_area_m2":               round(roof_area_m2, 0),
+        "runoff_coefficient":         RUNOFF_COEFFICIENT,
+        "monthly_rainfall_mm":        round(monthly_rainfall_mm, 2),
+        "expected_rainfall_mm":       round(expected_rainfall_mm, 2),  # daily estimate (mm) used in calc
+        "rainfall_m":                 round(b_rainfall_m, 5),          # daily rainfall converted to metres
+        "captured_volume_m3":         round(captured_volume_m3, 2),    # a x b x c result in cubic metres
         "rainfall_threshold_mm":      threshold_mm,
         "rwh_active":                 rwh_active,
+        "captured_litres_total":      round(captured_litres_total, 0),
         "rwh_contribution_litres":    round(rwh_contribution_litres, 0),
         "rwh_contribution_lpcd":      rwh_contribution_lpcd,
         "rwh_reduces_release_by_mld": round(rwh_contribution_litres / 1_000_000, 4)
+    }
+
+
+# ── Sewage generation tool ────────────────────────────────────────────────────
+
+@tool("sewage_tool")
+def sewage_tool(zone: str = "Jayanagar", date: str = "yesterday") -> dict:
+    """
+    Query sewage_history for sewage generated and surplus carried forward.
+    Surplus = yesterday_supply - sewage_generated
+    Sewage factor: 80% of supply (CPHEEO standard for Indian cities)
+    """
+    print("LangChain → Sewage DB")
+    con  = get_db("supply_db")
+    zone_lower = zone.lower()
+
+    if date in ("yesterday", "today", None):
+        from datetime import timedelta
+        target_date = (datetime.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    else:
+        target_date = date
+
+    row = con.execute("""
+        SELECT * FROM sewage_history
+        WHERE LOWER(ward_name) = ? AND date = ?
+        ORDER BY id DESC LIMIT 1
+    """, (zone_lower, target_date)).fetchone()
+
+    # Fallback to most recent
+    if not row:
+        row = con.execute("""
+            SELECT * FROM sewage_history
+            WHERE LOWER(ward_name) = ?
+            ORDER BY date DESC LIMIT 1
+        """, (zone_lower,)).fetchone()
+
+    con.close()
+    if not row:
+        return {"error": f"No sewage history found for '{zone}'"}
+
+    return {
+        "ward_name":              row["ward_name"],
+        "date":                   row["date"],
+        "population":             row["population"],
+        "supplied_lpcd":          row["supplied_lpcd"],
+        "sewage_factor":          row["sewage_factor"],
+        "sewage_generated_lpcd":  row["sewage_generated_lpcd"],
+        "sewage_generated_mld":   row["sewage_generated_mld"],
+        "surplus_lpcd":           row["surplus_lpcd"],
+        "surplus_mld":            row["surplus_mld"],
     }
 
 
@@ -330,5 +428,6 @@ TOOLS = {
     "rules_db":          rules_tool,
     "ward_db":           ward_tool,
     "supply_history_db": supply_history_tool,
-    "rwh_db":            rwh_tool
+    "rwh_db":            rwh_tool,
+    "sewage_db":         sewage_tool,
 }

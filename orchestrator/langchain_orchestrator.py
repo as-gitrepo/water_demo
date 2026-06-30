@@ -74,6 +74,16 @@ def inject_ward_subquestion(sub_questions: list) -> list:
 
     injected = list(sub_questions)
 
+    if "sewage_db" not in dbs_present:
+        injected.append({
+            "question":     f"What is the sewage generated in {zone} yesterday and the surplus carried forward?",
+            "db":           "sewage_db",
+            "model_needed": "none",
+            "zone":         zone,
+            "date":         "yesterday"
+        })
+        print(f"  [injected] sewage_db for {zone}")
+
     if "supply_history_db" not in dbs_present:
         injected.append({
             "question":     f"What was the actual water supply to {zone} yesterday in lpcd?",

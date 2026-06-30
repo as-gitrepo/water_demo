@@ -21,7 +21,7 @@ Each sub-question must be answerable by querying one of these databases:
 - rules_db: release policies, min/max release limits for the zone
 - ward_db: ward-level groundwater level (GWL), population, rainfall, temperature
 - supply_history_db: actual water supplied to a ward yesterday in lpcd and MLD, valve hours
-- rwh_db: rainwater harvesting house counts, tank sizes, RWH water contribution in lpcd
+- rwh_db: rainwater harvesting house counts, roof area catchment, RWH water contribution in lpcd
 
 Always generate ALL of these sub-questions when asked about water release for a zone:
 1. What was the actual supply to <zone> yesterday? → supply_history_db
@@ -56,7 +56,7 @@ def decompose_query(user_query: str) -> list:
         system_prompt=SYSTEM_PROMPT,
         user_message=user_query,
         temperature=0.1,
-        max_tokens=1000,
+        max_tokens=2000,       # increased — Gemini tokeniser needs more room for JSON array
         ttl=TTL_LLM_DECOMPOSE,
         cache_key_override=make_key("decompose", user_query)  # stable key — query only
     )

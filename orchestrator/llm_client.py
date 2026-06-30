@@ -63,7 +63,7 @@ class GroqProvider(LLMProvider):
             json={
                 "model":       model,
                 "temperature": temperature,
-                "max_tokens":  max_tokens,
+                "max_tokens":  4000,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user",   "content": user_message}

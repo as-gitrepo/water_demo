@@ -56,7 +56,10 @@ def compute_release(db_results: list) -> dict:
             "supplied_lpcd":     0, "supplied_mld": 0, "supply_date": "unknown",
             "supply_notes":      "Ward not found in database",
             "rwh_active":        False, "rwh_lpcd": 0, "rwh_pct": 0,
-            "rwh_houses":        0, "total_houses": 0, "tank_litres": 0,
+            "rwh_houses":        0, "total_houses": 0,
+            "building_area_km2": 0, "builtup_area_percentage": 0,
+            "roof_area_m2":      0, "runoff_coefficient": 0.60,
+            "captured_litres_total": 0,
             "rainfall_mm":       0, "threshold_mm": 5, "rwh_mld": 0,
             "adjusted_lpcd":     BANGALORE_NORM_LPCD,
             "required_mld":      0, "final_litres": 0,
@@ -81,6 +84,7 @@ def compute_release(db_results: list) -> dict:
 
     # ── Actual consumption from demand_db (residential + commercial + industrial)
     # More accurate than supplied_lpcd — excludes distribution losses
+    # Keep consumption fields for reference/display but don't use for surplus calc
     consumption_lpcd = demand.get("consumption_lpcd", 0)
     consumption_mld  = demand.get("actual_consumption_mld", 0)
     residential_mld  = demand.get("residential_mld", 0)
@@ -89,18 +93,30 @@ def compute_release(db_results: list) -> dict:
     losses_lpcd      = demand.get("losses_lpcd", 0)
     losses_mld       = demand.get("losses_mld", 0)
 
-    # Fallback: if consumption_history not available, use supplied_lpcd
-    if consumption_lpcd == 0 and supplied_lpcd > 0:
-        consumption_lpcd = supplied_lpcd
-        consumption_mld  = supplied_mld
+    # Extract sewage data — replaces consumption_history for surplus calculation
+    sewage = _get(db_results, "sewage_db")
+    sewage_lpcd        = sewage.get("sewage_generated_lpcd", 0)
+    sewage_mld         = sewage.get("sewage_generated_mld", 0)
+    sewage_factor      = sewage.get("sewage_factor", 0.80)
+    # Fallback: if no sewage DB data, compute from supply using standard factor
+    if sewage_lpcd == 0 and supplied_lpcd > 0:
+        sewage_factor = 0.80
+        sewage_lpcd   = round(supplied_lpcd * sewage_factor, 2)
+        sewage_mld    = round(supplied_mld  * sewage_factor, 4)
 
     rwh_active    = rwh.get("rwh_active", False)
-    rwh_lpcd      = rwh.get("rwh_contribution_lpcd", 0) if rwh_active else 0
+    rwh_lpcd      = rwh.get("rwh_contribution_lpcd", 0)
     rwh_pct       = rwh.get("rwh_percentage", 0)
     rwh_houses    = rwh.get("rwh_houses", 0)
     total_houses  = rwh.get("total_houses", 0)
-    tank_litres   = rwh.get("avg_tank_size_litres", 0)
+    building_area_km2       = rwh.get("building_area_km2", 0)
+    builtup_area_percentage = rwh.get("builtup_area_percentage", 0)
+    roof_area_m2             = rwh.get("roof_area_m2", 0)
+    runoff_coefficient       = rwh.get("runoff_coefficient", 0.60)
+    captured_litres_total    = rwh.get("captured_litres_total", 0)
     rainfall_mm   = rwh.get("expected_rainfall_mm", 0)
+    captured_volume_m3 = rwh.get("captured_volume_m3", 0)
+    monthly_rainfall_mm = rwh.get("monthly_rainfall_mm", 0)
     threshold_mm  = rwh.get("rainfall_threshold_mm", 5)
     rwh_mld       = rwh.get("rwh_reduces_release_by_mld", 0)
 
@@ -119,9 +135,10 @@ def compute_release(db_results: list) -> dict:
     deficit_mld   = demand.get("deficit_mld", 0)
 
     # ── Step 1: Total available water ───────────────────────────────────────
-    # supply - consumption = surplus carried forward from yesterday
+    # surplus = yesterday_supply - sewage_generated (80% of supply per CPHEEO)
+    # sewage is subtracted because that water has left the system
     # + RWH = additional water available from rainwater harvesting
-    surplus_lpcd     = round(supplied_lpcd - consumption_lpcd, 2)
+    surplus_lpcd     = round(supplied_lpcd - sewage_lpcd, 2)
     total_available  = round(surplus_lpcd + rwh_lpcd, 2)
 
     # ── Step 2: Water to release ─────────────────────────────────────────────
@@ -183,6 +200,9 @@ def compute_release(db_results: list) -> dict:
         "supplied_mld":       supplied_mld,
         "supply_date":        supply_date,
         "supply_notes":       supply_notes,
+        "sewage_lpcd":        sewage_lpcd,
+        "sewage_mld":         sewage_mld,
+        "sewage_factor":      sewage_factor,
         "consumption_lpcd":   consumption_lpcd,
         "consumption_mld":    consumption_mld,
         "residential_mld":    residential_mld,
@@ -201,8 +221,15 @@ def compute_release(db_results: list) -> dict:
         "rwh_pct":          rwh_pct,
         "rwh_houses":       rwh_houses,
         "total_houses":     total_houses,
-        "tank_litres":      tank_litres,
+        "tank_litres":      0,  # deprecated — kept for backward compat
+        "building_area_km2":       building_area_km2,
+        "builtup_area_percentage": builtup_area_percentage,
+        "roof_area_m2":            roof_area_m2,
+        "runoff_coefficient":      runoff_coefficient,
+        "captured_litres_total":   captured_litres_total,
         "rainfall_mm":      rainfall_mm,
+        "captured_volume_m3": captured_volume_m3,
+        "monthly_rainfall_mm": monthly_rainfall_mm,
         "threshold_mm":     threshold_mm,
 
         # Step 2
@@ -236,20 +263,17 @@ def build_narrative(zone: str, user_query: str, c: dict) -> dict:
     """
 
     # Build the fact sheet — all numbers computed by Python
+    # RWH contribution is calculated directly from rainfall — no on/off threshold gate
     rwh_status = (
-        f"ACTIVE\n"
-        f"  Expected rainfall = {c['rainfall_mm']}mm (>= {c['threshold_mm']}mm threshold — tanks will fill)\n"
-        f"  Houses with RWH   = {c['rwh_houses']:,} of {c['total_houses']:,} ({c['rwh_pct']}%)\n"
-        f"  Avg tank size     = {c['tank_litres']:,} litres\n"
-        f"  Fill factor       = 20% due to rainfall\n"
-        f"  Volume collected  = {c['rwh_houses']:,} x {c['tank_litres']:,}L x 20% = {int(c['rwh_houses']*c['tank_litres']*0.20):,} litres\n"
-        f"  RWH contribution  = {int(c['rwh_houses']*c['tank_litres']*0.20):,} div {c['population']:,} people = {c['rwh_lpcd']} lpcd ({c['rwh_mld']} MLD)"
-        if c['rwh_active']
-        else (
-            f"NOT ACTIVE\n"
-            f"  Expected rainfall = {c['rainfall_mm']}mm (< {c['threshold_mm']}mm threshold — tanks will NOT fill)\n"
-            f"  RWH contribution  = 0 lpcd"
-        )
+        f"  Expected rainfall      = {c['rainfall_mm']}mm\n"
+        f"  Houses with RWH        = {c['rwh_houses']:,} of {c['total_houses']:,} ({c['rwh_pct']}%)\n"
+        f"  Building area          = {c['building_area_km2']} km2\n"
+        f"  Builtup area           = {c['builtup_area_percentage']}% of ward\n"
+        f"  Roof area (85% of builtup) = {int(c['roof_area_m2']):,} m2\n"
+        f"  Runoff coefficient     = {c['runoff_coefficient']}\n"
+        f"  Captured (roof x rain x coeff) = {int(c['captured_litres_total']):,} litres\n"
+        f"  Scaled to RWH adoption ({c['rwh_pct']}%) = {int(c['captured_litres_total']*c['rwh_pct']/100):,} litres\n"
+        f"  RWH contribution       = {int(c['captured_litres_total']*c['rwh_pct']/100):,} / {c['population']:,} people = {c['rwh_lpcd']} lpcd ({c['rwh_mld']} MLD)"
     )
 
     facts = f"""
@@ -266,15 +290,12 @@ FOR DIRECT ANSWER — use this sentence:
 === PRE-COMPUTED FACTS ===
 
 STEP 1 — TOTAL AVAILABLE WATER:
-  Formula: total_available = (supply - consumption) + RWH
+  Formula: total_available = (supply - sewage_generated) + RWH
 
   Yesterday supply           = {c['supplied_lpcd']} lpcd ({c['supplied_mld']} MLD)
-  Actual consumption         = {c['consumption_lpcd']} lpcd ({c['consumption_mld']} MLD)
-    Residential              = {c['residential_mld']} MLD
-    Commercial               = {c['commercial_mld']} MLD
-    Industrial               = {c['industrial_mld']} MLD
-    Distribution losses      = {c['losses_lpcd']} lpcd ({c['losses_mld']} MLD) — excluded
-  Supply surplus (carried forward) = {c['supplied_lpcd']} - {c['consumption_lpcd']} = {c['surplus_lpcd']} lpcd
+  Sewage generated           = {c['sewage_lpcd']} lpcd ({c['sewage_mld']} MLD)
+    Sewage factor            = {c['sewage_factor']} (CPHEEO standard: 80% of supply returns as sewage)
+  Surplus carried forward    = {c['supplied_lpcd']} - {c['sewage_lpcd']} = {c['surplus_lpcd']} lpcd
   RWH status                 = {rwh_status}
   Total available            = {c['surplus_lpcd']} (surplus) + {c['rwh_lpcd']} (RWH) = {c['total_available']} lpcd
 
@@ -320,29 +341,39 @@ Write ONE sentence in this exact pattern:
 KEY FACTORS
 Write each step on its own line exactly like this — no cramming into one line:
 
-Step 1 — Total available water  (formula: supply - consumption + RWH)
+Step 1 — Total available water  (formula: supply - sewage_generated + RWH)
   Yesterday's supply    = {supplied_lpcd} lpcd  ({supplied_mld} MLD)
-  Actual consumption    = {consumption_lpcd} lpcd  (residential {residential_mld} + commercial {commercial_mld} + industrial {industrial_mld} MLD)
-  Losses excluded       = {losses_lpcd} lpcd  ({losses_mld} MLD)
-  Surplus carried fwd   = {supplied_lpcd} - {consumption_lpcd} = {surplus_lpcd} lpcd
-  RWH contribution      = {rwh_lpcd} lpcd  ({rwh_pct}% of {total_houses} houses, {tank}L tanks, rainfall {rainfall_mm}mm ≥ {threshold_mm}mm, 20% fill)
+  Sewage generated      = {sewage_lpcd} lpcd  ({sewage_factor} × supply, CPHEEO standard)
+  Surplus carried fwd   = {supplied_lpcd} - {sewage_lpcd} = {surplus_lpcd} lpcd
+  RWH contribution      = {rwh_lpcd} lpcd  (see Step 2 for calculation)
   Total available       = {surplus_lpcd} + {rwh_lpcd} = {total_available} lpcd
 
-Step 2 — Water to release  (formula: demand - total_available)
+Step 2 — RWH catchment calculation  (formula: roof area × rainfall × runoff coefficient)
+  RWH daily rainfall est = {monthly_rainfall_mm}mm/month ÷ days in month = {rainfall_mm}mm/day
+  RWH rainfall check    = {rainfall_mm}mm of rainfall expected — contributes proportionally, no on/off threshold
+  RWH roof area (a)     = {builtup_area_percentage}% builtup × 85% roof = {roof_area}m2
+  RWH rainfall (b)      = {rainfall_mm}mm = [rainfall_mm/1000] m
+  RWH runoff coeff (c)  = 0.6
+  RWH volume (a×b×c)    = {roof_area}m2 × [rainfall in m] × 0.6 = [result] m3
+  RWH volume in litres  = [m3 result] × 1000 = [captured litres]
+  RWH adoption scaling  = [captured litres] × {rwh_pct}% = [scaled litres]
+  RWH per capita        = [scaled litres] ÷ {population} people = {rwh_lpcd} lpcd
+
+Step 3 — Water to release  (formula: demand - total_available)
   Demand (norm)         = {norm_lpcd} lpcd
   Total available       = {total_available} lpcd
   Water to release      = {norm_lpcd} - {total_available} = {adjusted_lpcd} lpcd
   [if adjusted_lpcd ≤ 0: "Total available exceeds demand — no release required"]
   [if adjusted_lpcd > 0: state release volume in litres and MLD]
 
-Step 3 — Policy check
+Step 4 — Policy check
   [one line stating the policy result and final release]
 
-Step 4 — Valve hours
+Step 5 — Valve hours
   [one line: litres ÷ flow_rate = hours OR "valve need not be opened"]
 
 Supporting data
-  RWH: {rwh_houses} of {total_houses} houses ({rwh_pct}%) | avg tank {tank}L
+  RWH: {rwh_houses} of {total_houses} houses ({rwh_pct}%) | roof area {roof_area}m2 | runoff coeff {runoff}
   GWL: {gwl}m, {trend} trend | Deficit: {deficit} MLD
 
 RISK ASSESSMENT
@@ -359,11 +390,7 @@ Write numbered action steps starting with the valve instruction."""
             temperature=0.2,
             max_tokens=600,
             ttl=TTL_LLM_SUMMARISE,
-            cache_key_override=make_key(
-                "narrative", zone,
-                str(c['valve_hours']), str(c['final_mld']),
-                str(c['rwh_active']), str(c['adjusted_lpcd'])
-            )
+            cache_key_override=make_key("narrative", zone, facts)
         )
         result = _parse_sections(raw)
 
@@ -448,16 +475,20 @@ def _fallback_sections(zone: str, c: dict, error: str) -> dict:
         )
 
     # KEY FACTORS — clean aligned format
+    captured_total = c.get('captured_litres_total', 0)
+    captured_m3    = c.get('captured_volume_m3', 0)
+    rwh_scaled     = int(captured_total * c['rwh_pct'] / 100)
+    days_note = f"  RWH daily rainfall est = {c['monthly_rainfall_mm']}mm/month ÷ days in month = {c['rainfall_mm']}mm/day\n"
     rwh_line = (
         f"  RWH contribution      = {c['rwh_lpcd']} lpcd\n"
-        f"                          Expected rainfall {c['rainfall_mm']}mm ≥ {c['threshold_mm']}mm threshold\n"
-        f"                          → fills 20% of {c['rwh_houses']:,} RWH tanks ({c['tank_litres']:,}L avg)\n"
-        f"                          → {c['rwh_houses']:,} × {c['tank_litres']:,}L × 20% = {int(c['rwh_houses']*c['tank_litres']*0.20):,} litres\n"
-        f"                          → {int(c['rwh_houses']*c['tank_litres']*0.20):,} ÷ {c['population']:,} people = {c['rwh_lpcd']} lpcd"
-        if c['rwh_active']
-        else f"  RWH contribution      = 0 lpcd\n"
-             f"                          Expected rainfall {c['rainfall_mm']}mm < {c['threshold_mm']}mm threshold\n"
-             f"                          → RWH tanks will not fill — no contribution"
+        f"{days_note}"
+        f"  RWH roof area (a)     = {c['builtup_area_percentage']}% builtup × 85% roof = {int(c['roof_area_m2']):,} m2\n"
+        f"  RWH rainfall (b)      = {c['rainfall_mm']}mm = {round(c['rainfall_mm']/1000, 5)} m\n"
+        f"  RWH runoff coeff (c)  = {c['runoff_coefficient']}\n"
+        f"  RWH volume (a×b×c)    = {int(c['roof_area_m2']):,} m2 × {round(c['rainfall_mm']/1000, 5)} m × {c['runoff_coefficient']} = {captured_m3:,.2f} m3\n"
+        f"  RWH volume in litres  = {captured_m3:,.2f} m3 × 1000 = {int(captured_total):,} litres\n"
+        f"  RWH adoption scaling  = {int(captured_total):,} × {c['rwh_pct']}% = {rwh_scaled:,} litres\n"
+        f"  RWH per capita        = {rwh_scaled:,} ÷ {c['population']:,} people = {c['rwh_lpcd']} lpcd"
     )
     step2_line = (
         f"  Required release      = 0 MLD  (RWH covers full demand)"
@@ -470,26 +501,27 @@ def _fallback_sections(zone: str, c: dict, error: str) -> dict:
         else f"  Valve open duration   = {c['final_litres']:,} litres \u00f7 {c['flow_rate_lph']:,} lph = {c['valve_hours']} hours"
     )
     kf = (
-        f"Step 1 — Total available water  (supply - consumption + RWH)\n"
+        f"Step 1 — Total available water  (supply - sewage_generated + RWH)\n"
         f"  Yesterday's supply    = {c['supplied_lpcd']} lpcd  ({c['supplied_mld']} MLD)\n"
-        f"  Actual consumption    = {c['consumption_lpcd']} lpcd  (res {c['residential_mld']} + com {c['commercial_mld']} + ind {c['industrial_mld']} MLD)\n"
-        f"  Losses excluded       = {c['losses_lpcd']} lpcd  ({c['losses_mld']} MLD)\n"
-        f"  Surplus carried fwd   = {c['supplied_lpcd']} - {c['consumption_lpcd']} = {c['surplus_lpcd']} lpcd\n"
-        f"{rwh_line}\n"
+        f"  Sewage generated      = {c['sewage_lpcd']} lpcd  ({c['sewage_mld']} MLD, factor {c['sewage_factor']} per CPHEEO)\n"
+        f"  Surplus carried fwd   = {c['supplied_lpcd']} - {c['sewage_lpcd']} = {c['surplus_lpcd']} lpcd\n"
+        f"  RWH contribution      = {c['rwh_lpcd']} lpcd  (see Step 2 for calculation)\n"
         f"  Total available       = {c['surplus_lpcd']} + {c['rwh_lpcd']} = {c['total_available']} lpcd\n"
-        f"\nStep 2 — Water to release  (demand - total_available)\n"
+        f"\nStep 2 — RWH catchment calculation  (roof area × rainfall × runoff coefficient)\n"
+        f"{rwh_line}\n"
+        f"\nStep 3 — Water to release  (demand - total_available)\n"
         f"  Demand (norm)         = {c['norm_lpcd']} lpcd\n"
         f"  Total available       = {c['total_available']} lpcd\n"
         f"  Water to release      = {c['norm_lpcd']} - {c['total_available']} = {c['adjusted_lpcd']} lpcd"
         + (" → total available exceeds demand — no release needed\n" if c['demand_met'] else "\n")
         + step2_line + "\n"
-        + f"\nStep 3 — Policy check\n"
+        + f"\nStep 4 — Policy check\n"
         + f"  {c['policy_state']}\n"
         + f"  Final release         = {c['final_mld']} MLD = {c['lpcd_equiv']} lpcd equivalent\n"
-        + f"\nStep 4 — Valve hours\n"
+        + f"\nStep 5 — Valve hours\n"
         + step4_line + "\n"
         + f"\nSupporting data\n"
-        + f"  RWH: {c['rwh_houses']:,} of {c['total_houses']:,} houses ({c['rwh_pct']}%)  |  avg tank {c['tank_litres']:,}L\n"
+        + f"  RWH: {c['rwh_houses']:,} of {c['total_houses']:,} houses ({c['rwh_pct']}%)  |  roof area {int(c['roof_area_m2']):,}m2\n"
         + f"  GWL: {c['gwl']}m, {c['gwl_trend']} trend  |  Deficit: {c['deficit_mld']} MLD"
     )
 
@@ -499,10 +531,10 @@ def _fallback_sections(zone: str, c: dict, error: str) -> dict:
         risks.append(f"- Yesterday supply {c['supplied_lpcd']} lpcd was below {c['norm_lpcd']} lpcd norm — MEDIUM")
     if c['gwl_trend'] == 'declining':
         risks.append(f"- Groundwater level {c['gwl']}m declining — MEDIUM")
-    if c['rwh_active']:
-        risks.append(f"- RWH dependency HIGH — if rainfall < {c['threshold_mm']}mm, full {c['norm_lpcd']} lpcd must come from pipe — HIGH")
+    if c['rwh_lpcd'] > 0:
+        risks.append(f"- RWH contributes {c['rwh_lpcd']} lpcd based on {c['rainfall_mm']}mm daily rainfall — if actual rainfall is lower, release quantity must be increased — MEDIUM")
     else:
-        risks.append("- RWH not active today — full demand must be met by piped supply — MEDIUM")
+        risks.append(f"- No rainfall expected — RWH contribution is 0 lpcd, full demand must come from piped supply — MEDIUM")
     if c['deficit_mld'] > 0:
         risks.append(f"- Current supply deficit of {c['deficit_mld']} MLD — MEDIUM")
     if not risks:
@@ -512,16 +544,16 @@ def _fallback_sections(zone: str, c: dict, error: str) -> dict:
     if c['valve_hours'] == 0:
         rec = (
             f"1. The supply valve to {zone} does not need to be opened tomorrow.\n"
-            f"2. Confirm rainfall forecast ≥ {c['threshold_mm']}mm before withholding supply.\n"
-            f"3. Keep valve on standby — open immediately if rainfall drops below {c['threshold_mm']}mm.\n"
+            f"2. RWH contribution of {c['rwh_lpcd']} lpcd combined with surplus covers the {c['norm_lpcd']} lpcd norm.\n"
+            f"3. Keep valve on standby — open if actual rainfall is significantly lower than {c['rainfall_mm']}mm.\n"
             f"4. Monitor GWL trend — currently {c['gwl']}m and {c['gwl_trend']}."
         )
     else:
         rec = (
             f"1. Open the supply valve to {zone} for {c['valve_hours']} hours tomorrow.\n"
             f"2. Target release of {c['final_mld']} MLD to meet adjusted demand of {c['adjusted_lpcd']} lpcd.\n"
-            f"3. Monitor GWL — currently {c['gwl']}m with {c['gwl_trend']} trend.\n"
-            f"4. Investigate yesterday's supply shortfall of {round(c['norm_lpcd']-c['supplied_lpcd'],2)} lpcd."
+            f"3. RWH is contributing {c['rwh_lpcd']} lpcd based on estimated {c['rainfall_mm']}mm daily rainfall — adjust release if actual rainfall differs.\n"
+            f"4. Monitor GWL — currently {c['gwl']}m with {c['gwl_trend']} trend."
         )
 
     return {

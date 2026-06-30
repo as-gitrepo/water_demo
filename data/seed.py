@@ -195,3 +195,11 @@ spec2 = importlib.util.spec_from_file_location("seed_supply",
     os.path.join(os.path.dirname(__file__), "seed_supply.py"))
 mod2 = importlib.util.module_from_spec(spec2)
 spec2.loader.exec_module(mod2)
+
+
+# ── Sewage DB (sewage_generation + sewage_history) ────────────────────────────
+import os as _os
+_sewage_path = _os.path.join(_os.path.dirname(__file__), "seed_sewage.py")
+spec3 = importlib.util.spec_from_file_location("seed_sewage", _sewage_path)
+mod3  = importlib.util.module_from_spec(spec3)
+spec3.loader.exec_module(mod3)
