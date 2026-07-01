@@ -352,7 +352,7 @@ Step 2 — RWH catchment calculation  (roof area x rainfall x runoff coefficient
   RWH roof area (a)     = {int(c['roof_area_m2']):,} m²
   RWH rainfall (b)      = {c['rainfall_mm']}mm = {c['rainfall_m']}m
   RWH runoff coeff (c)  = {c['runoff_coefficient']}
-  RWH volume (a x b x c )  = {int(c['roof_area_m2']):,} m² x {c['rainfall_m']}m x {c['runoff_coefficient']} = {c['captured_volume_m3']} m³
+  RWH volume (axbxc)    = {int(c['roof_area_m2']):,} m² x {c['rainfall_m']}m x {c['runoff_coefficient']} = {c['captured_volume_m3']} m³
   RWH volume in litres  = {c['captured_volume_m3']} m³ x 1000 = {int(c['captured_litres_total']):,} litres
   RWH adoption scaling  = {int(c['captured_litres_total']):,} litres x {c['rwh_pct']}% = {c['rwh_contribution_litres']:,} litres
   RWH per capita        = {c['rwh_contribution_litres']:,} litres / {c['population']:,} people = {c['rwh_lpcd']} lpcd
@@ -378,7 +378,7 @@ Write 3-4 numbered action steps."""
             temperature=0.2,
             max_tokens=1400,
             ttl=TTL_LLM_SUMMARISE,
-            cache_key_override=make_key("narrative", zone, facts)
+            cache_key_override=make_key("narrative", zone, user_query)
         )
         result = _parse_sections(raw)
 
