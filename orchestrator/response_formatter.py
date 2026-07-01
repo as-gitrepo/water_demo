@@ -60,7 +60,8 @@ def compute_release(db_results: list) -> dict:
             "building_area_km2": 0, "builtup_area_percentage": 0,
             "roof_area_m2":      0, "runoff_coefficient": 0.60,
             "captured_litres_total": 0,
-            "rainfall_mm":       0, "threshold_mm": 5, "rwh_mld": 0,
+            "rainfall_mm":       0, "rainfall_m": 0, "threshold_mm": 5, "rwh_mld": 0,
+            "rwh_contribution_litres": 0,
             "adjusted_lpcd":     BANGALORE_NORM_LPCD,
             "required_mld":      0, "final_litres": 0,
             "min_mld": 0, "max_mld": 999,
@@ -166,7 +167,7 @@ def compute_release(db_results: list) -> dict:
         policy_state = "No release required — total available water covers demand. Policy minimum does not apply."
     elif required_mld < min_mld:
         final_mld    = min_mld
-        policy_state = f"Calculated {required_mld} MLD is below policy minimum — release set to {min_mld} MLD"
+        policy_state = f"Calculated {required_mld} MLD is below policy minimum of {min_mld} MLD — release set to {min_mld} MLD"
     elif required_mld > max_mld:
         final_mld    = max_mld
         policy_state = f"Calculated {required_mld} MLD exceeds policy maximum — release clamped to {max_mld} MLD"
@@ -214,6 +215,7 @@ def compute_release(db_results: list) -> dict:
         "rwh_active":         rwh_active,
         "rwh_lpcd":           rwh_lpcd,
         "rwh_mld":            rwh_mld,
+        "rwh_contribution_litres": int(captured_litres_total * rwh_pct / 100),
         "total_available":    total_available,
         "adjusted_lpcd":      adjusted_lpcd,
 
@@ -228,6 +230,7 @@ def compute_release(db_results: list) -> dict:
         "runoff_coefficient":      runoff_coefficient,
         "captured_litres_total":   captured_litres_total,
         "rainfall_mm":      rainfall_mm,
+        "rainfall_m":       round(rainfall_mm / 1000, 7),
         "captured_volume_m3": captured_volume_m3,
         "monthly_rainfall_mm": monthly_rainfall_mm,
         "threshold_mm":     threshold_mm,
@@ -325,70 +328,55 @@ SUPPORTING DATA:
   Current deficit            = {c['deficit_mld']} MLD
 """.strip()
 
-    system = """You are a senior water distribution engineer at BWSSB (Bangalore Water Supply and Sewerage Board).
+    system = f"""You are a senior water distribution engineer at BWSSB Bangalore.
 
-You will receive pre-computed facts about a water release query.
-Your job is to write clear narrative for exactly four sections using ONLY the numbers provided.
-Do NOT recalculate anything. Do NOT change any numbers.
+You will receive pre-computed facts. Copy the numbers exactly — do not recalculate anything.
 
-OUTPUT FORMAT — use exactly these four headers:
+Write exactly these four sections with these exact headers:
 
 DIRECT ANSWER
-Write ONE sentence in this exact pattern:
-- If valve_hours = 0: "Total available water covers demand for {zone} tomorrow — the supply valve does not need to be opened. Supply surplus of {surplus_lpcd} lpcd + RWH {rwh_lpcd} lpcd = {total_available} lpcd available, which exceeds the {norm_lpcd} lpcd norm."
-- If valve_hours > 0: "The supply valve to {zone} should be opened for {valve_hours} hours tomorrow to release {final_mld} MLD ({lpcd_equiv} lpcd equivalent) of water."
+{"Total available water covers demand for " + zone + " tomorrow — the supply valve does not need to be opened." if c['valve_hours'] == 0 else "The supply valve to " + zone + " should be opened for " + str(c['valve_hours']) + " hours tomorrow to release " + str(c['final_mld']) + " MLD (" + str(c['lpcd_equiv']) + " lpcd equivalent) of water."}
 
 KEY FACTORS
-Write each step on its own line exactly like this — no cramming into one line:
+Write steps using this exact format for each line — two spaces indent, label, two spaces, equals sign, two spaces, value:
 
-Step 1 — Total available water  (formula: supply - sewage_generated + RWH)
-  Yesterday's supply    = {supplied_lpcd} lpcd  ({supplied_mld} MLD)
-  Sewage generated      = {sewage_lpcd} lpcd  ({sewage_factor} × supply, CPHEEO standard)
-  Surplus carried fwd   = {supplied_lpcd} - {sewage_lpcd} = {surplus_lpcd} lpcd
-  RWH contribution      = {rwh_lpcd} lpcd  (see Step 2 for calculation)
-  Total available       = {surplus_lpcd} + {rwh_lpcd} = {total_available} lpcd
+Step 1 — Total available water  (supply - sewage_generated + RWH)
+  Yesterday's supply    = {c['supplied_lpcd']} lpcd  ({c['supplied_mld']} MLD)
+  Sewage generated      = {c['sewage_lpcd']} lpcd  ({c['sewage_factor']} x supply, CPHEEO standard)
+  Surplus carried fwd   = {c['supplied_lpcd']} - {c['sewage_lpcd']} = {c['surplus_lpcd']} lpcd
+  RWH contribution      = {c['rwh_lpcd']} lpcd
+  Total available       = {c['surplus_lpcd']} + {c['rwh_lpcd']} = {c['total_available']} lpcd
 
-Step 2 — RWH catchment calculation  (formula: roof area × rainfall × runoff coefficient)
-  RWH daily rainfall est = {monthly_rainfall_mm}mm/month ÷ days in month = {rainfall_mm}mm/day
-  RWH rainfall check    = {rainfall_mm}mm of rainfall expected — contributes proportionally, no on/off threshold
-  RWH roof area (a)     = {builtup_area_percentage}% builtup × 85% roof = {roof_area}m2
-  RWH rainfall (b)      = {rainfall_mm}mm = [rainfall_mm/1000] m
-  RWH runoff coeff (c)  = 0.6
-  RWH volume (a×b×c)    = {roof_area}m2 × [rainfall in m] × 0.6 = [result] m3
-  RWH volume in litres  = [m3 result] × 1000 = [captured litres]
-  RWH adoption scaling  = [captured litres] × {rwh_pct}% = [scaled litres]
-  RWH per capita        = [scaled litres] ÷ {population} people = {rwh_lpcd} lpcd
+Step 2 — RWH catchment calculation  (roof area x rainfall x runoff coefficient)
+  RWH daily rainfall    = {c['monthly_rainfall_mm']}mm per month = {c['rainfall_mm']}mm per day
+  RWH roof area (a)     = {int(c['roof_area_m2']):,} m2
+  RWH rainfall (b)      = {c['rainfall_mm']}mm = {c['rainfall_m']}m
+  RWH runoff coeff (c)  = {c['runoff_coefficient']}
+  RWH volume (axbxc)    = {int(c['roof_area_m2']):,} m2 x {c['rainfall_m']}m x {c['runoff_coefficient']} = {c['captured_volume_m3']} m3
+  RWH volume in litres  = {c['captured_volume_m3']} m3 x 1000 = {int(c['captured_litres_total']):,} litres
+  RWH adoption scaling  = {int(c['captured_litres_total']):,} litres x {c['rwh_pct']}% = {c['rwh_contribution_litres']:,} litres
+  RWH per capita        = {c['rwh_contribution_litres']:,} litres / {c['population']:,} people = {c['rwh_lpcd']} lpcd
 
-Step 3 — Water to release  (formula: demand - total_available)
-  Demand (norm)         = {norm_lpcd} lpcd
-  Total available       = {total_available} lpcd
-  Water to release      = {norm_lpcd} - {total_available} = {adjusted_lpcd} lpcd
-  [if adjusted_lpcd ≤ 0: "Total available exceeds demand — no release required"]
-  [if adjusted_lpcd > 0: state release volume in litres and MLD]
+Step 3 — Water to release  (demand - total_available)
+  Demand (norm)         = {c['norm_lpcd']} lpcd
+  Total available       = {c['total_available']} lpcd
+  Water to release      = {c['norm_lpcd']} - {c['total_available']} = {c['adjusted_lpcd']} lpcd
+  Release volume        = {c['final_litres']:,} litres = {c['required_mld']} MLD
 
-Step 4 — Policy check
-  [one line stating the policy result and final release]
-
-Step 5 — Valve hours
-  [one line: litres ÷ flow_rate = hours OR "valve need not be opened"]
-
-Supporting data
-  RWH: {rwh_houses} of {total_houses} houses ({rwh_pct}%) | roof area {roof_area}m2 | runoff coeff {runoff}
-  GWL: {gwl}m, {trend} trend | Deficit: {deficit} MLD
+(Steps 4 and 5 will be added automatically — do not write them.)
 
 RISK ASSESSMENT
-Write bullet points with LOW / MEDIUM / HIGH severity.
-Include: supply deficit, GWL trend, RWH dependency on rainfall, pipeline/valve risks
+Write 3-4 bullet points. Each bullet starts with a dash. End each with — HIGH, — MEDIUM, or — LOW.
 
 RECOMMENDATION
-Write numbered action steps starting with the valve instruction."""
+Write 3-4 numbered action steps."""
 
     try:
         raw = call_llm(
             system_prompt=system,
             user_message=facts,
             temperature=0.2,
-            max_tokens=600,
+            max_tokens=1400,
             ttl=TTL_LLM_SUMMARISE,
             cache_key_override=make_key("narrative", zone, facts)
         )
@@ -399,11 +387,55 @@ Write numbered action steps starting with the valve instruction."""
             print("  [formatter] parse failed — using Python fallback")
             return _fallback_sections(zone, c, "LLM format unrecognised")
 
+        # Inject Python-computed Steps 4 and 5 into key_factors — never trust LLM for these
+        result["key_factors"] = _inject_policy_valve_steps(result.get("key_factors", ""), c)
+
         return result
 
     except Exception as e:
         # Fallback — build sections directly from facts
         return _fallback_sections(zone, c, str(e))
+
+
+def _inject_policy_valve_steps(key_factors: str, c: dict) -> str:
+    """
+    Replace whatever the LLM wrote for Steps 4 (Policy check) and 5 (Valve hours)
+    with Python-computed values — these are pure arithmetic, LLM must not improvise.
+    Strips any existing Step 4/5 content and appends the correct structured lines.
+    """
+    import re
+
+    # Build the canonical Step 4 and 5 from Python facts
+    step4 = (
+        f"\nStep 4 — Policy check\n"
+        f"  Policy limits         = Min {c['min_mld']} MLD, Max {c['max_mld']} MLD\n"
+        f"  Policy state          = {c['policy_state']}\n"
+        f"  Final release         = {c['final_mld']} MLD = {c['lpcd_equiv']} lpcd equivalent"
+    )
+
+    if c['valve_hours'] == 0:
+        step5 = (
+            f"\nStep 5 — Valve hours\n"
+            f"  Valve open duration   = No release required — valve need not be opened"
+        )
+    else:
+        step5 = (
+            f"\nStep 5 — Valve hours\n"
+            f"  Final release volume  = {c['final_litres']:,} litres\n"
+            f"  Pipeline flow rate    = {c['flow_rate_lph']:,} lph\n"
+            f"  Valve open duration   = {c['final_litres']:,} litres ÷ {c['flow_rate_lph']:,} lph = {c['valve_hours']} hours"
+        )
+
+    # Remove any existing Step 4 / Step 5 content the LLM may have written
+    # (stops at next Step N or end of string)
+    cleaned = re.sub(
+        r'\n?Step\s*[45]\s*[—–-][^\n]*(?:\n(?!Step\s*[1-9]).*)*',
+        '',
+        key_factors,
+        flags=re.IGNORECASE
+    ).rstrip()
+
+    return cleaned + step4 + step5
 
 
 def _parse_sections(raw: str) -> dict:
@@ -621,9 +653,21 @@ Rules: each KEY FACTORS bullet starts with •, explains context not just number
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def is_release_query(query: str) -> bool:
+    q = query.lower()
+
+    # Explicit exclusions — these contain "release" but are factual lookups,
+    # not requests to calculate a release volume/valve schedule
+    exclusion_patterns = [
+        "policy limit", "policy for", "release polic",
+        "min release", "max release", "minimum release", "maximum release",
+        "release rule", "what is the policy", "what are the policy",
+    ]
+    if any(p in q for p in exclusion_patterns):
+        return False
+
     keywords = ["release", "quantity to release", "how much water",
                 "valve", "supply tomorrow", "water tomorrow"]
-    return any(kw in query.lower() for kw in keywords)
+    return any(kw in q for kw in keywords)
 
 
 def format_response(user_query: str, zone: str,
